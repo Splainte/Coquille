@@ -11,7 +11,7 @@ Le nom « Coquille » = *typo* en français. 🙂
 
 ```
 Séquence Premiere
-   │  (panneau UXP) rendu audio WAV + lecture du transcript natif (timecodes + confiance)
+   │  (panneau CEP) rendu audio WAV (exportAsMediaDirect)
    ▼
 Backend local (FastAPI, machines maison)
    ├─ Whisper(X) / Voxtral   → texte précis + timestamps au mot
@@ -20,10 +20,16 @@ Backend local (FastAPI, machines maison)
    ├─ segmentation/lignes     → CPS, max car/ligne, ≤2 lignes, équilibrage
    └─ export SRT
    ▼
-Panneau UXP
+Panneau CEP
    ├─ révision humaine (cues éditables, faible confiance surlignée)
    └─ importFiles(.srt) → createCaptionTrack() → Track Style de marque (1 clic)
 ```
+
+> **Runtime : CEP** (et non UXP). L'insertion auto de piste caption
+> (`createCaptionTrack`) et le rendu audio (`exportAsMediaDirect`) n'existent qu'en
+> ExtendScript ; la référence UXP 2026 ne les expose pas. Choix assumé pour un outil
+> interne (Premiere épinglé) ; le backend étant agnostique du runtime, un re-port UXP
+> futur ne touchera que le panneau. Détails : `cep-panel/README.md`.
 
 Décisions de conception et état de l'API Premiere : voir
 `~/.claude/plans/je-souhaite-cr-er-une-ticklish-cherny.md`.
@@ -33,8 +39,9 @@ Décisions de conception et état de l'API Premiere : voir
 | Dossier        | Rôle |
 |----------------|------|
 | `backend/`     | Pipeline Python : transcription, alignement, correction, segmentation, SRT, API REST. |
-| `uxp-panel/`   | Panneau UXP (UI + accès Premiere : audio, transcript, insertion). |
-| `legacy-jsx/`  | Repli ExtendScript pour l'insertion uniquement. |
+| `cep-panel/`   | **Panneau CEP** (UI + ExtendScript : audio, insertion). Runtime actif. |
+| `uxp-panel/`   | Squelette UXP **archivé** — conservé pour un re-port futur (cf. son README). |
+| `legacy-jsx/`  | Brouillon ExtendScript initial (repris/élargi dans `cep-panel/jsx/`). |
 | `backend/presets/`  | 3 presets média (règles de segmentation + rappel du Track Style). |
 | `backend/glossary/` | Glossaires éditables (base + par média) — cœur de la correction. |
 
@@ -65,11 +72,13 @@ python3 -m unittest discover -s tests -v  # 19 tests
 - ✅ **Backend** : pipeline complet, testé (alignement, correction glossaire,
   segmentation/équilibrage, SRT). Correction LLM OpenRouter câblée (mode hors-ligne
   déterministe pour les tests).
-- 🟡 **Panneau UXP** : squelette fonctionnel + appels API. **3 points à valider par
-  un spike sur Premiere** (signalés `⚠ SPIKE` dans le code) :
-  1. lecture du transcript natif (`uxp-panel/src/ppro/transcript.js`) ;
-  2. rendu audio de la séquence (`uxp-panel/src/ppro/audio.js`) ;
-  3. `createCaptionTrack()` réel (`uxp-panel/src/ppro/captions.js`).
+- 🟡 **Panneau CEP** : scaffold complet (UI + `jsx/coquille.jsx` + ponts backend).
+  Spike à lancer dans Premiere via le bouton **🔍 Diagnostic** (sonde `createCaptionTrack`,
+  `exportAsMediaDirect`, backend, séquence active). 2 des 3 points reposent sur des API
+  ExtendScript documentées ; reste à confirmer sur la version cible + configurer le
+  preset audio `.epr`. La lecture du transcript natif n'est pas fiable en ExtendScript →
+  fonctionnement Whisper-seul pour l'instant.
+- ⚪ **Panneau UXP** : archivé (pas de `createCaptionTrack` en UXP, cf. `uxp-panel/README.md`).
 - 🟡 **Track Styles** : à créer une fois dans Premiere (noms `Coquille — Frandroid/
   Numerama/Clubic`), valeurs de référence dans `backend/presets/*.json`.
 

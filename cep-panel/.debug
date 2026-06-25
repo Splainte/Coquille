@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Active le débogage du panneau (équivaut à PlayerDebugMode=1).
+  En dev, ouvre http://localhost:8088 dans Chrome pour inspecter le panneau.
+  À retirer pour la distribution.
+-->
+<ExtensionList>
+  <Extension Id="com.coquille.subtitles.panel">
+    <HostList>
+      <Host Name="PPRO" Port="8088" />
+    </HostList>
+  </Extension>
+</ExtensionList>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Coquille — panneau CEP de sous-titrage pour Premiere Pro.
+
+  CEP retenu (et non UXP) car seul ExtendScript expose createCaptionTrack
+  (insertion auto de la piste caption) + exportAsMediaDirect (rendu audio).
+  Outil interne : version Premiere épinglable, déprécation CEP gérable.
+  Le backend Python reste agnostique du runtime → re-port UXP futur peu coûteux.
+-->
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.coquille.subtitles"
+    ExtensionBundleVersion="0.1.0"
+    ExtensionBundleName="Coquille"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ExtensionList>
+    <Extension Id="com.coquille.subtitles.panel" Version="0.1.0" />
+  </ExtensionList>
+
+  <ExecutionEnvironment>
+    <HostList>
+      <!-- PPRO = Premiere Pro. 25.0 → 99.9 couvre 2025+ -->
+      <Host Name="PPRO" Version="[25.0,99.9]" />
+    </HostList>
+    <LocaleList>
+      <Locale Code="All" />
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="9.0" />
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+
+  <DispatchInfoList>
+    <Extension Id="com.coquille.subtitles.panel">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./jsx/coquille.jsx</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>Coquille — Sous-titres</Menu>
+          <Geometry>
+            <Size><Width>320</Width><Height>480</Height></Size>
+            <MinSize><Width>280</Width><Height>360</Height></MinSize>
+          </Geometry>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

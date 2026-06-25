@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 try:
     from fastapi import FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
@@ -26,6 +27,15 @@ from .serialize import cue_to_dict, word_from_dict, word_to_dict
 from .transcribe import load_premiere_transcript, transcribe_audio
 
 app = FastAPI(title="Coquille", version="0.1.0")
+
+# Le panneau CEP s'exécute dans CEF depuis une origine "file://" (= "null").
+# Outil local uniquement (127.0.0.1) → on autorise toutes les origines.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ProcessRequest(BaseModel):

@@ -1,4 +1,14 @@
-# Panneau UXP Coquille
+# Panneau UXP Coquille — ⚠ ARCHIVÉ
+
+> **Non utilisé.** Le runtime actif est **CEP** (`../cep-panel/`). Raison : l'API UXP
+> 2026 n'expose **pas** `createCaptionTrack` (insertion de piste caption) ni le rendu
+> audio — `Sequence`/`SequenceEditor`/`CaptionTrack` sont en lecture seule. Ces API
+> n'existent qu'en ExtendScript, d'où le choix CEP.
+>
+> Ce squelette est **conservé pour un re-port futur** : le jour où UXP exposera la
+> création de captions, seul ce dossier changera (le backend est agnostique du runtime).
+> Les API UXP vérifiées au passage : audio = `EncoderManager.exportSequence`,
+> transcript = `Transcript.exportToJSON(clipProjectItem)`.
 
 Panneau de sous-titrage pour Premiere Pro (UXP, min. 25.1). Squelette **sans étape
 de build** (JS vanilla + Spectrum natif) pour démarrer vite ; à migrer vers
