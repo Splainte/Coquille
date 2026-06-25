@@ -1,0 +1,25 @@
+{
+  "_comment": "Glossaire commun aux trois médias. canonical = forme/casse correcte ; aliases = erreurs fréquentes de transcription (multi-mots autorisés). Étendre au fil des corrections manuelles récurrentes.",
+  "terms": [
+    { "canonical": "iPhone", "aliases": ["i phone", "i-phone", "iphone", "aïe phone"] },
+    { "canonical": "iOS", "aliases": ["i o s", "ios", "i.o.s"] },
+    { "canonical": "iPad", "aliases": ["i pad", "ipad"] },
+    { "canonical": "macOS", "aliases": ["mac os", "macos", "mac o s"] },
+    { "canonical": "Android", "aliases": ["androïd", "androide"] },
+    { "canonical": "Apple", "aliases": ["appeul", "apeul"] },
+    { "canonical": "Google", "aliases": ["gougle", "gougueule"] },
+    { "canonical": "Samsung", "aliases": ["sam sung", "samsoung"] },
+    { "canonical": "Microsoft", "aliases": ["micro soft", "maïcrosoft"] },
+    { "canonical": "Windows", "aliases": ["windaud", "windaus", "windo"] },
+    { "canonical": "Wi-Fi", "aliases": ["wifi", "wi fi", "ouifi"] },
+    { "canonical": "Bluetooth", "aliases": ["blue tooth", "bloutouth", "bloutouf"] },
+    { "canonical": "USB-C", "aliases": ["usb c", "usbc", "u s b c"] },
+    { "canonical": "OLED", "aliases": ["o led", "oled", "o l e d"] },
+    { "canonical": "smartphone", "aliases": ["smart phone", "smartfone"] },
+    { "canonical": "intelligence artificielle", "aliases": ["i a"], "note": "préférer la forme longue à l'oral" },
+    { "canonical": "ChatGPT", "aliases": ["chat gpt", "tchat gpt", "chat g p t"] },
+    { "canonical": "open source", "aliases": ["opensource", "open-source"] },
+    { "canonical": "streaming", "aliases": ["streamingue", "striming"] },
+    { "canonical": "cloud", "aliases": ["claoud", "klaoud"] }
+  ]
+}

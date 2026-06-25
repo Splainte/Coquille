@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Sorties
+*.srt
+*.wav
+backend/out/
+
+# Secrets
+.env
+
+# OS / éditeurs
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,35 @@
+{
+  "manifestVersion": 5,
+  "id": "com.coquille.subtitles",
+  "name": "Coquille",
+  "version": "0.1.0",
+  "main": "index.html",
+  "host": [
+    {
+      "app": "premierepro",
+      "minVersion": "25.1.0"
+    }
+  ],
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "coquille.panel",
+      "label": { "default": "Coquille — Sous-titres" },
+      "minimumSize": { "width": 280, "height": 360 },
+      "preferredDockedSize": { "width": 320, "height": 480 }
+    }
+  ],
+  "requiredPermissions": {
+    "localFileSystem": "request",
+    "network": {
+      "domains": [
+        "http://127.0.0.1:8765",
+        "http://localhost:8765"
+      ]
+    },
+    "allowCodeGenerationFromStrings": false
+  },
+  "icons": [
+    { "width": 23, "height": 23, "path": "icons/light.png", "scale": [1, 2], "theme": ["lightest", "light", "dark", "darkest"] }
+  ]
+}

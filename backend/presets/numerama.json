@@ -1,0 +1,25 @@
+{
+  "media": "numerama",
+  "label": "Numerama",
+  "glossary": "numerama",
+  "track_style": "Coquille — Numerama",
+  "style": {
+    "font": "Inter",
+    "font_size": 46,
+    "fill_color": "#FFFFFF",
+    "background_color": "#6C2BD9",
+    "background_opacity": 0.85,
+    "position": "bottom-center",
+    "uppercase": false,
+    "_note": "Violet Numerama. À reproduire dans un Track Style Premiere nommé 'Coquille — Numerama'."
+  },
+  "segmentation": {
+    "max_chars_per_line": 42,
+    "max_lines": 2,
+    "max_cps": 16.0,
+    "min_duration": 1.0,
+    "max_duration": 6.0,
+    "min_gap": 0.08,
+    "gap_split": 0.6
+  }
+}

@@ -1,0 +1,11 @@
+# Serveur API
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+
+# Correction LLM (OpenRouter)
+httpx>=0.27
+
+# Transcription (machine GPU maison) — lourd, installer séparément si besoin :
+#   pip install whisperx
+# whisperx

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: "adobe-clean", sans-serif; margin: 0; padding: 12px; color: #e8e8e8; }
+      h1 { font-size: 14px; margin: 0 0 12px; }
+      .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+      select, button { font-size: 12px; padding: 6px 8px; }
+      button { cursor: pointer; }
+      #status { font-size: 11px; color: #9aa; min-height: 16px; margin: 8px 0; }
+      #cues { font-size: 11px; max-height: 300px; overflow: auto; border-top: 1px solid #444; padding-top: 8px; }
+      .cue { padding: 6px 0; border-bottom: 1px solid #333; }
+      .cue .tc { color: #7ab; }
+      .cue textarea { width: 100%; box-sizing: border-box; background: #2a2a2a; color: #eee; border: 1px solid #444; font-size: 11px; }
+      .low { color: #e88; }
+    </style>
+  </head>
+  <body>
+    <h1>Coquille — Sous-titres</h1>
+
+    <div class="row">
+      <label for="media">Média :</label>
+      <select id="media"></select>
+    </div>
+
+    <div class="row">
+      <button id="generate">1. Générer les sous-titres</button>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="offline" /> Mode hors-ligne (glossaire seul, sans LLM)</label>
+    </div>
+
+    <div id="status"></div>
+    <div id="cues"></div>
+
+    <div class="row">
+      <button id="insert" disabled>2. Insérer dans la séquence</button>
+    </div>
+
+    <script src="src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "_comment": "Spécifique Clubic : PC, hardware, composants, logiciels, gaming.",
+  "terms": [
+    { "canonical": "GeForce RTX", "aliases": ["geforce r t x", "ge force rtx", "geforce artix"] },
+    { "canonical": "Radeon", "aliases": ["radéon", "radion"] },
+    { "canonical": "Ryzen", "aliases": ["raïzen", "rizen", "rajenne"] },
+    { "canonical": "Intel Core", "aliases": ["intel core", "intel corps", "intèl core"] },
+    { "canonical": "SSD", "aliases": ["s s d", "essesse de"] },
+    { "canonical": "NVMe", "aliases": ["n v m e", "nvémé"] },
+    { "canonical": "DDR5", "aliases": ["d d r 5", "dédéère cinq", "ddr cinq"] },
+    { "canonical": "overclocking", "aliases": ["over clocking", "auvèrcloquing"] },
+    { "canonical": "ray tracing", "aliases": ["raytracing", "rai tracing", "rè treïssing"] },
+    { "canonical": "Steam", "aliases": ["stim", "stîm"], "note": "plateforme de jeu" },
+    { "canonical": "Linux", "aliases": ["linoux", "linuxe"] }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "media": "frandroid",
+  "label": "Frandroid",
+  "glossary": "frandroid",
+  "track_style": "Coquille — Frandroid",
+  "style": {
+    "font": "Poppins",
+    "font_size": 48,
+    "fill_color": "#FFFFFF",
+    "background_color": "#00B14F",
+    "background_opacity": 0.85,
+    "position": "bottom-center",
+    "uppercase": false,
+    "_note": "Vert Frandroid. À reproduire dans un Track Style Premiere nommé 'Coquille — Frandroid'."
+  },
+  "segmentation": {
+    "max_chars_per_line": 40,
+    "max_lines": 2,
+    "max_cps": 17.0,
+    "min_duration": 1.0,
+    "max_duration": 6.0,
+    "min_gap": 0.08,
+    "gap_split": 0.6
+  }
+}

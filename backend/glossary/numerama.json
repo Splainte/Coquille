@@ -1,0 +1,15 @@
+{
+  "_comment": "Spécifique Numerama : tech, sciences, culture numérique, IA, espace.",
+  "terms": [
+    { "canonical": "SpaceX", "aliases": ["space x", "spaisse x", "espace x"] },
+    { "canonical": "Starlink", "aliases": ["star link", "starlinque"] },
+    { "canonical": "Nvidia", "aliases": ["n vidia", "in vidia", "envidia"] },
+    { "canonical": "OpenAI", "aliases": ["open ai", "open a i", "opène ai"] },
+    { "canonical": "Midjourney", "aliases": ["mid journey", "midjourné"] },
+    { "canonical": "blockchain", "aliases": ["block chain", "bloc chaîne", "blockchaine"] },
+    { "canonical": "cryptomonnaie", "aliases": ["crypto monnaie", "cripto monnaie"] },
+    { "canonical": "métavers", "aliases": ["meta verse", "métaverse", "meta vers"] },
+    { "canonical": "deepfake", "aliases": ["deep fake", "dipfake", "dip faïk"] },
+    { "canonical": "James Webb", "aliases": ["james web", "jameswebb", "djeïmsse web"] }
+  ]
+}

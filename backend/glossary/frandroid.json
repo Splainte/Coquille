@@ -1,0 +1,16 @@
+{
+  "_comment": "Spécifique Frandroid : mobile, Android, opérateurs, constructeurs.",
+  "terms": [
+    { "canonical": "Pixel", "aliases": ["pixelle", "pixel google"] },
+    { "canonical": "Galaxy", "aliases": ["galaxie", "galaxi"] },
+    { "canonical": "OnePlus", "aliases": ["one plus", "wan plus", "1 plus"] },
+    { "canonical": "Xiaomi", "aliases": ["chao mi", "ksiaomi", "shao mi"] },
+    { "canonical": "Honor", "aliases": ["honneur", "onor"] },
+    { "canonical": "Snapdragon", "aliases": ["snap dragon", "snapdragone"] },
+    { "canonical": "5G", "aliases": ["cinq g", "5 g"] },
+    { "canonical": "AMOLED", "aliases": ["a moled", "amolède"] },
+    { "canonical": "eSIM", "aliases": ["e sim", "i sim", "yeu sim"] },
+    { "canonical": "Free", "aliases": ["fri"], "note": "opérateur" },
+    { "canonical": "Bouygues Telecom", "aliases": ["bouygue telecom", "bwig telecom"] }
+  ]
+}
