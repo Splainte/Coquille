@@ -6,7 +6,7 @@ Sortie : cues + SRT prêts à insérer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .align import align
 from .config import load_preset
@@ -37,12 +37,19 @@ def process(
     whisper_words: list[Word] | None = None,
     premiere_words: list[Word] | None = None,
     offline: bool | None = None,
+    max_chars_per_line: int | None = None,
 ) -> PipelineResult:
     if not whisper_words and not premiere_words:
         raise ValueError("Fournir au moins whisper_words ou premiere_words.")
 
     preset = load_preset(media)
     glossary = load_glossary(media)
+
+    # Override de la largeur de ligne piloté depuis le panneau (indépendant du
+    # média, qui ne porte pour l'instant qu'une intention esthétique).
+    rules = preset.segmentation
+    if max_chars_per_line:
+        rules = replace(rules, max_chars_per_line=max_chars_per_line)
 
     # 1. Alignement hybride (ou source unique).
     if whisper_words and premiere_words:
@@ -54,7 +61,7 @@ def process(
     words = correct(words, glossary, media, offline=offline)
 
     # 3. Segmentation / équilibrage des lignes.
-    cues = segment(words, preset.segmentation)
+    cues = segment(words, rules)
 
     # 4. Export SRT.
     srt_text = to_srt(cues)

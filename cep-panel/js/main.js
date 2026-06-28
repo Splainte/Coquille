@@ -123,6 +123,14 @@ function init() {
     });
   }).catch(function () { /* backend down : déjà signalé via getPresets */ });
 
+  // Max caractères/ligne : piloté ici (indépendant du média), persisté localement.
+  var saved = null;
+  try { saved = window.localStorage.getItem("coquille.maxchars"); } catch (e) {}
+  if (saved) { $("maxchars").value = saved; }
+  $("maxchars").addEventListener("change", function () {
+    try { window.localStorage.setItem("coquille.maxchars", $("maxchars").value); } catch (e) {}
+  });
+
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
   $("diag").addEventListener("click", onDiagnostic);
@@ -136,6 +144,7 @@ function onGenerate() {
   var media = $("media").value;
   var engine = $("engine").value || "auto";
   var offline = $("offline").checked;
+  var maxChars = parseInt($("maxchars").value, 10) || null;
 
   if (!AUDIO_PRESET_PATH) {
     setStatus("Preset audio non configuré (window.COQUILLE.audioPresetPath dans " +
@@ -161,7 +170,10 @@ function onGenerate() {
     })
     .then(function (whisperWords) {
       setStatus("Alignement, correction et segmentation…");
-      return backend.process({ media: media, whisper_words: whisperWords, offline: offline });
+      return backend.process({
+        media: media, whisper_words: whisperWords, offline: offline,
+        max_chars_per_line: maxChars,
+      });
     })
     .then(function (result) {
       lastResult = result;

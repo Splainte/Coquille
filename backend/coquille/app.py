@@ -52,6 +52,7 @@ class ProcessRequest(BaseModel):
     premiere_words: Optional[list[dict]] = None
     premiere_transcript: Optional[dict[str, Any]] = None  # JSON brut Premiere
     offline: Optional[bool] = None
+    max_chars_per_line: Optional[int] = None  # override piloté par le panneau
 
 
 class TranscribeRequest(BaseModel):
@@ -80,12 +81,19 @@ def post_process(req: ProcessRequest) -> dict:
     elif req.premiere_transcript:
         premiere_words = load_premiere_transcript(req.premiere_transcript)
 
+    mcpl = req.max_chars_per_line
+    if mcpl is not None and not (10 <= mcpl <= 80):
+        raise HTTPException(
+            status_code=400, detail="max_chars_per_line doit être entre 10 et 80."
+        )
+
     try:
         result = process(
             req.media,
             whisper_words=whisper_words,
             premiere_words=premiere_words,
             offline=req.offline,
+            max_chars_per_line=mcpl,
         )
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
