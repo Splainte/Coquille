@@ -34,6 +34,19 @@ _DANGLING = {
 }
 
 
+def _can_break_before(words: list[Word], k: int) -> bool:
+    """Vrai si on peut couper (ligne ou cue) juste avant words[k] sans casser un
+    collage. On ne coupe jamais entre deux tokens collés (high / -tech, n' / allez)
+    car rendus sur deux lignes/cues distincts ils perdraient leur jointure."""
+    if k <= 0 or k >= len(words):
+        return False
+    if _NO_SPACE_BEFORE.match(words[k].text):
+        return False
+    if words[k - 1].text.endswith(_NO_SPACE_AFTER):
+        return False
+    return True
+
+
 def render(words: list[Word]) -> str:
     """Rend une suite de mots en texte propre (gestion des espaces/ponctuation)."""
     out = ""
@@ -53,8 +66,9 @@ def _wrap_greedy(words: list[Word], max_line: int) -> list[str]:
     Garantit des lignes <= max_line (sauf mot isolé plus long que max_line)."""
     lines: list[str] = []
     line: list[Word] = []
-    for w in words:
-        if line and len(render(line + [w])) > max_line:
+    for i, w in enumerate(words):
+        breakable = _can_break_before(words, i)
+        if line and breakable and len(render(line + [w])) > max_line:
             lines.append(render(line))
             line = [w]
         else:
@@ -82,10 +96,13 @@ def _best_cut_index(words: list[Word], k: int) -> int:
     frontière de proposition (ponctuation), sinon on évite de finir sur un
     mot-outil. Renvoie un index de coupure entre 1 et k."""
     for j in range(k, 0, -1):
-        if words[j - 1].text.rstrip().endswith(_CLAUSE_PUNCT):
+        if _can_break_before(words, j) and words[j - 1].text.rstrip().endswith(_CLAUSE_PUNCT):
             return j
     j = k
-    while j > 1 and words[j - 1].text.lower().strip("'’") in _DANGLING:
+    while j > 1 and (
+        not _can_break_before(words, j)
+        or words[j - 1].text.lower().strip("'’") in _DANGLING
+    ):
         j -= 1
     return j
 
@@ -111,6 +128,30 @@ def _pack_segment(seg: list[Word], rules: SegmentationRules) -> list[list[Word]]
         split = _best_cut_index(rest, k)
         cues.append(rest[:split])
         rest = rest[split:]
+    return _avoid_orphan_cue(cues, rules)
+
+
+def _avoid_orphan_cue(
+    cues: list[list[Word]], rules: SegmentationRules
+) -> list[list[Word]]:
+    """Évite qu'un cue ne contienne qu'un seul mot (« meilleur. » seul) : on
+    refusionne avec le cue précédent puis on recoupe au point le plus équilibré
+    (en nombre de mots) où chaque moitié tient encore dans un cue."""
+    if len(cues) < 2 or len(cues[-1]) != 1:
+        return cues
+    merged = cues[-2] + cues[-1]
+    best: tuple[int, int] | None = None
+    for k in range(1, len(merged)):
+        if not _can_break_before(merged, k):
+            continue
+        left, right = merged[:k], merged[k:]
+        if len(right) < 2 or not _fits(left, rules) or not _fits(right, rules):
+            continue
+        score = abs(len(left) - len(right))
+        if best is None or score < best[0]:
+            best = (score, k)
+    if best is not None:
+        cues[-2:] = [merged[: best[1]], merged[best[1] :]]
     return cues
 
 
@@ -155,7 +196,8 @@ def _split_lines(words: list[Word], rules: SegmentationRules) -> list[str]:
 
     candidates = [
         k for k in range(1, len(words))
-        if len(render(words[:k])) <= max_line and len(render(words[k:])) <= max_line
+        if _can_break_before(words, k)
+        and len(render(words[:k])) <= max_line and len(render(words[k:])) <= max_line
     ]
     if not candidates:
         # Aucune coupure 2 lignes valide (souvent un mot plus long que la ligne) :

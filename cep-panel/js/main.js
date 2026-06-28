@@ -25,6 +25,25 @@ var $ = function (id) { return document.getElementById(id); };
 var setStatus = function (msg) { $("status").textContent = msg; };
 var lastResult = null;
 
+// --- Nettoyage des temporaires ----------------------------------------------
+// Les WAV (rendu audio) et SRT (insertion) s'écrivent dans os.tmpdir() avec un
+// nom horodaté. On supprime le WAV dès la transcription faite, et on purge au
+// démarrage les coquille-*.wav/srt de plus d'une heure (au cas où).
+function rmFile(p) { try { require("fs").unlinkSync(p); } catch (e) {} }
+
+function cleanupOldTmp() {
+  try {
+    var fs = require("fs"), os = require("os"), pathmod = require("path");
+    var dir = os.tmpdir(), now = Date.now();
+    fs.readdirSync(dir).forEach(function (name) {
+      if (!/^coquille-.*\.(wav|srt)$/.test(name)) return;
+      var fp = pathmod.join(dir, name);
+      try { if (now - fs.statSync(fp).mtimeMs > 3600000) fs.unlinkSync(fp); }
+      catch (e) {}
+    });
+  } catch (e) { /* hors Node : rien à nettoyer */ }
+}
+
 // --- Pont ExtendScript ------------------------------------------------------
 function evalScript(code) {
   return new Promise(function (resolve, reject) {
@@ -98,6 +117,7 @@ var backend = {
 
 // --- Initialisation ---------------------------------------------------------
 function init() {
+  cleanupOldTmp();
   backend.getPresets().then(function (presets) {
     var sel = $("media");
     presets.forEach(function (p) {
@@ -166,7 +186,10 @@ function onGenerate() {
     .then(function (res) {
       var wav = res.indexOf("OK:") === 0 ? res.slice(3) : tmpWav;
       setStatus("Transcription (" + engine + ")…");
-      return backend.transcribe(wav, engine);
+      return backend.transcribe(wav, engine).then(function (words) {
+        rmFile(wav);  // WAV inutile une fois transcrit
+        return words;
+      });
     })
     .then(function (whisperWords) {
       setStatus("Alignement, correction et segmentation…");

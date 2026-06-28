@@ -179,6 +179,29 @@ class TestSegment(unittest.TestCase):
         for ln in lines:
             self.assertLessEqual(len(ln), 24)
 
+    def test_no_orphan_word_as_own_cue(self):
+        # Régression : "...encore meilleur." laissait "meilleur." seul dans un
+        # cue. On veut le rééquilibrer avec le cue précédent (>= 2 mots partout).
+        rules = SegmentationRules(max_chars_per_line=24, gap_split=5.0)
+        toks = "et qui vont rendre votre quotidien encore meilleur.".split()
+        words = [W(t, i * 0.3, 0.3) for i, t in enumerate(toks)]
+        cues = segment(words, rules)
+        self.assertGreaterEqual(len(cues), 2)
+        # Aucun cue ne se réduit à un mot solitaire.
+        for c in cues:
+            self.assertGreater(len(c.text.split()), 1, c.text)
+
+    def test_never_breaks_glued_tokens_across_lines(self):
+        # Régression : la coupure tombait entre "high" et "-tech" → "high\n-tech".
+        rules = SegmentationRules(max_chars_per_line=24)
+        toks = ["appareils", "high", "-tech", "favoris."]
+        words = [W(t, i * 0.3, 0.3) for i, t in enumerate(toks)]
+        lines = _split_lines(words, rules)
+        joined = "\n".join(lines)
+        self.assertIn("high-tech", joined)
+        self.assertNotIn("high\n", joined)
+        self.assertNotIn("\n-tech", joined)
+
     def test_max_chars_caps_cue(self):
         rules = SegmentationRules(max_chars_per_line=10, gap_split=5.0, max_duration=60)
         words = [W(w, i * 0.2, 0.2) for i, w in enumerate(
