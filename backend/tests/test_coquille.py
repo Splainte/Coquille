@@ -157,6 +157,28 @@ class TestSegment(unittest.TestCase):
         self.assertEqual(len(cues), 2)
         self.assertLess(cues[0].end, cues[1].start)  # blanc conservé
 
+    def test_no_overlap_when_cue_shorter_than_min_duration(self):
+        # Un ST court ne doit jamais empiéter sur le suivant (régression :
+        # le plancher de durée min poussait sa fin après le début du suivant).
+        rules = SegmentationRules(min_duration=1.0, gap_split=0.6,
+                                  max_hold_gap=0.5, max_chars_per_line=40)
+        words = [W("Oui.", 23.9, 0.16), W("Bon", 24.04, 0.3), W("alors", 24.34, 0.3)]
+        cues = segment(words, rules)
+        self.assertGreaterEqual(len(cues), 2)
+        for a, b in zip(cues, cues[1:]):
+            self.assertLessEqual(a.end, b.start)  # aucun chevauchement
+
+    def test_split_lines_picks_most_balanced(self):
+        # 2 lignes : on veut l'équilibre, pas "presque tout puis un reste".
+        rules = SegmentationRules(max_chars_per_line=24)
+        toks = "Salut, voici un petit essai".split()
+        words = [W(t, i * 0.3, 0.3) for i, t in enumerate(toks)]
+        lines = _split_lines(words, rules)
+        self.assertEqual(len(lines), 2)
+        self.assertLessEqual(abs(len(lines[0]) - len(lines[1])), 4)
+        for ln in lines:
+            self.assertLessEqual(len(ln), 24)
+
     def test_max_chars_caps_cue(self):
         rules = SegmentationRules(max_chars_per_line=10, gap_split=5.0, max_duration=60)
         words = [W(w, i * 0.2, 0.2) for i, w in enumerate(

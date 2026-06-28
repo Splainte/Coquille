@@ -141,43 +141,38 @@ def _group_into_cues(words: list[Word], rules: SegmentationRules) -> list[list[W
     return groups
 
 
-def _score_break(left: list[Word], right: list[Word], max_line: int) -> float:
-    """Plus le score est bas, meilleure est la coupure entre `left` et `right`."""
-    l1, l2 = len(render(left)), len(render(right))
-    if l1 > max_line or l2 > max_line:
-        return float("inf")
-    score = abs(l1 - l2)  # équilibre des longueurs
-    last = left[-1].text.lower().strip(".,;:!?")
-    first_raw = right[0].text
-    # Coupure juste après une ponctuation forte → bonus.
-    if left[-1].text.endswith((".", ",", ";", ":", "!", "?", "…")):
-        score -= 6
-    # Coupure après un mot-outil → malus (le mot pendrait en fin de ligne).
-    if last in _DANGLING or left[-1].text.lower() in _DANGLING:
-        score += 8
-    # Coupure juste avant un caractère collant (ponctuation, trait d'union,
-    # apostrophe) → interdit de fait (ne doit pas démarrer une ligne).
-    if _NO_SPACE_BEFORE.match(first_raw):
-        score += 50
-    return score
-
-
 def _split_lines(words: list[Word], rules: SegmentationRules) -> list[str]:
-    """Découpe les mots d'un cue en 1 ou 2 lignes équilibrées."""
+    """Découpe les mots d'un cue en 1 ou 2 lignes, AU PLUS équilibrées.
+
+    Parmi toutes les coupures où *les deux lignes* tiennent dans la largeur, on
+    prend la plus équilibrée (écart de longueur minimal). La ponctuation et les
+    mots-outils ne servent que de départage léger — ils ne peuvent pas imposer
+    un déséquilibre (pas de "22 puis 4")."""
+    max_line = rules.max_chars_per_line
     full = render(words)
-    if len(full) <= rules.max_chars_per_line or len(words) < 2:
+    if len(full) <= max_line or len(words) < 2:
         return [full]
 
-    best_k, best_score = None, float("inf")
-    for k in range(1, len(words)):
-        score = _score_break(words[:k], words[k:], rules.max_chars_per_line)
-        if score < best_score:
-            best_score, best_k = score, k
+    candidates = [
+        k for k in range(1, len(words))
+        if len(render(words[:k])) <= max_line and len(render(words[k:])) <= max_line
+    ]
+    if not candidates:
+        # Aucune coupure 2 lignes valide (souvent un mot plus long que la ligne) :
+        # repli sur l'emballage glouton.
+        return _wrap_greedy(words, max_line)
 
-    if best_k is None or best_score == float("inf"):
-        # Aucune coupure en 2 lignes équilibrées : repli sur l'emballage glouton
-        # (le groupe a été borné pour tenir en max_lines lignes).
-        return _wrap_greedy(words, rules.max_chars_per_line)
+    def score(k: int) -> float:
+        l1, l2 = len(render(words[:k])), len(render(words[k:]))
+        s = float(abs(l1 - l2))                       # priorité : équilibre
+        last = words[k - 1].text
+        if last.rstrip().endswith((".", "!", "?", "…", ",", ";", ":")):
+            s -= 2                                     # léger bonus ponctuation
+        if last.lower().strip("'’") in _DANGLING:
+            s += 6                                     # éviter un mot-outil pendu
+        return s
+
+    best_k = min(candidates, key=score)
     return [render(words[:best_k]), render(words[best_k:])]
 
 
@@ -207,10 +202,13 @@ def segment(words: list[Word], rules: SegmentationRules) -> list[Cue]:
 
 
 def _enforce_gaps(cues: list[Cue], rules: SegmentationRules) -> None:
-    """Évite les chevauchements et garde un écart minimal entre cues."""
+    """Empêche tout chevauchement : la fin d'un cue ne dépasse jamais le début
+    du suivant (moins min_gap). Contrainte dure, prioritaire sur la durée
+    minimale — sinon un cue court pourrait empiéter sur le suivant."""
     for a, b in zip(cues, cues[1:]):
-        if a.end > b.start - rules.min_gap:
-            a.end = max(a.start + rules.min_duration / 2, b.start - rules.min_gap)
+        latest_end = b.start - rules.min_gap
+        if a.end > latest_end:
+            a.end = max(a.start, latest_end)  # jamais < a.start (durée >= 0)
 
 
 def _close_small_gaps(cues: list[Cue], rules: SegmentationRules) -> None:
