@@ -28,6 +28,9 @@ class SegmentationRules:
     max_duration: float = 6.0      # durée max d'un cue (s)
     min_gap: float = 0.08          # écart min entre deux cues (s)
     gap_split: float = 0.6         # une pause >= à ça force un nouveau cue (s)
+    max_hold_gap: float = 0.5      # écart < à ça entre deux cues = pas un vrai
+    #                                silence → on tient le 1er ST jusqu'au 2nd
+    #                                (coupe directe, sans image vide)
 
 
 @dataclass

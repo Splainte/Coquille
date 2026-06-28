@@ -61,33 +61,80 @@ def _wrap_greedy(words: list[Word], max_line: int) -> list[str]:
     return lines
 
 
-def _group_into_cues(words: list[Word], rules: SegmentationRules) -> list[list[Word]]:
-    """Découpe la suite de mots en groupes (un groupe = un futur cue)."""
-    groups: list[list[Word]] = []
-    current: list[Word] = []
+_SENTENCE_END = (".", "!", "?", "…")
+_CLAUSE_PUNCT = (".", "!", "?", "…", ",", ";", ":")
 
-    for i, w in enumerate(words):
+
+def _fits(words: list[Word], rules: SegmentationRules) -> bool:
+    """Vrai si ces mots tiennent dans un cue (≤ max_lines lignes, ≤ max_duration)."""
+    if not words:
+        return True
+    if (words[-1].end - words[0].start) > rules.max_duration:
+        return False
+    return len(_wrap_greedy(words, rules.max_chars_per_line)) <= rules.max_lines
+
+
+def _best_cut_index(words: list[Word], k: int) -> int:
+    """Meilleur point de coupure dans words[:k+...] : on privilégie la dernière
+    frontière de proposition (ponctuation), sinon on évite de finir sur un
+    mot-outil. Renvoie un index de coupure entre 1 et k."""
+    for j in range(k, 0, -1):
+        if words[j - 1].text.rstrip().endswith(_CLAUSE_PUNCT):
+            return j
+    j = k
+    while j > 1 and words[j - 1].text.lower().strip("'’") in _DANGLING:
+        j -= 1
+    return j
+
+
+def _pack_segment(seg: list[Word], rules: SegmentationRules) -> list[list[Word]]:
+    """Empaquette une phrase en autant de cues que nécessaire, en coupant aux
+    meilleures frontières (ponctuation de proposition de préférence)."""
+    cues: list[list[Word]] = []
+    rest = seg
+    while rest:
+        if _fits(rest, rules):
+            cues.append(rest)
+            break
+        # Plus grand préfixe qui tient dans un cue.
+        k = 0
+        for j in range(1, len(rest) + 1):
+            if _fits(rest[:j], rules):
+                k = j
+            else:
+                break
+        if k == 0:  # un seul mot ne tient pas (cas extrême) : on avance quand même
+            k = 1
+        split = _best_cut_index(rest, k)
+        cues.append(rest[:split])
+        rest = rest[split:]
+    return cues
+
+
+def _group_into_cues(words: list[Word], rules: SegmentationRules) -> list[list[Word]]:
+    """Découpe la suite de mots en groupes (un groupe = un futur cue).
+
+    Deux temps : (1) on segmente d'abord aux frontières *dures* — vraie pause ou
+    fin de phrase — pour des coupes cohérentes ; (2) on empaquette chaque phrase
+    en cues seulement si elle dépasse les limites de taille/durée.
+    """
+    segments: list[list[Word]] = []
+    current: list[Word] = []
+    for w in words:
         if current:
             prev = current[-1]
             gap = w.start - prev.end
-            # Déborde si l'emballage du groupe dépasse le nombre de lignes autorisé.
-            wrapped = _wrap_greedy(current + [w], rules.max_chars_per_line)
-            would_overflow = len(wrapped) > rules.max_lines
-            would_be_too_long = (w.end - current[0].start) > rules.max_duration
-            # Une pause franche, un débordement, une durée trop longue, ou une
-            # fin de phrase précédente → on clôt le cue courant.
-            if (
-                gap >= rules.gap_split
-                or would_overflow
-                or would_be_too_long
-                or (prev.is_eos and len(render(current)) >= rules.max_chars_per_line // 2)
-            ):
-                groups.append(current)
+            ends_sentence = prev.is_eos or prev.text.rstrip().endswith(_SENTENCE_END)
+            if gap >= rules.gap_split or ends_sentence:
+                segments.append(current)
                 current = []
         current.append(w)
-
     if current:
-        groups.append(current)
+        segments.append(current)
+
+    groups: list[list[Word]] = []
+    for seg in segments:
+        groups.extend(_pack_segment(seg, rules))
     return groups
 
 
@@ -151,6 +198,7 @@ def segment(words: list[Word], rules: SegmentationRules) -> list[Cue]:
         cues.append(Cue(index=idx, start=start, end=end, lines=lines))
 
     _enforce_gaps(cues, rules)
+    _close_small_gaps(cues, rules)
     return cues
 
 
@@ -159,3 +207,13 @@ def _enforce_gaps(cues: list[Cue], rules: SegmentationRules) -> None:
     for a, b in zip(cues, cues[1:]):
         if a.end > b.start - rules.min_gap:
             a.end = max(a.start + rules.min_duration / 2, b.start - rules.min_gap)
+
+
+def _close_small_gaps(cues: list[Cue], rules: SegmentationRules) -> None:
+    """Supprime les images vides quand l'écart n'est pas un vrai silence :
+    on tient le sous-titre jusqu'au suivant (coupe directe ST→ST). Un écart
+    >= max_hold_gap est considéré comme un vrai silence et laissé tel quel."""
+    for a, b in zip(cues, cues[1:]):
+        gap = b.start - a.end
+        if 0 < gap < rules.max_hold_gap:
+            a.end = b.start

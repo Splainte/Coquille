@@ -114,6 +114,49 @@ class TestSegment(unittest.TestCase):
         cues = segment(words, rules)
         self.assertGreaterEqual(cues[0].duration, 1.0)
 
+    def test_cuts_at_sentence_end_even_without_pause(self):
+        # Deux phrases qui s'enchaînent sans pause : la coupe doit tomber à la fin
+        # de la 1re phrase, pas au milieu de la 2nde.
+        rules = SegmentationRules(max_chars_per_line=60, max_lines=2,
+                                  max_duration=20, gap_split=0.6, min_duration=0.1)
+        words = [W("Le", 0.0, 0.3), W("Pixel", 0.3, 0.3), W("est", 0.6, 0.3),
+                 W("rapide.", 0.9, 0.3), W("Il", 1.3, 0.3), W("chauffe", 1.6, 0.3),
+                 W("un", 1.9, 0.3), W("peu.", 2.2, 0.3)]
+        cues = segment(words, rules)
+        self.assertEqual(len(cues), 2)
+        self.assertIn("rapide", cues[0].text)
+        self.assertIn("chauffe", cues[1].text)
+
+    def test_long_sentence_cuts_at_question_mark(self):
+        # Reproduit le cas réel : "…Galaxy Z Fold 7? Alors vous le savez…" doit
+        # couper après le "?", pas au milieu de "Alors vous le savez".
+        rules = load_preset("frandroid").segmentation
+        text = ("Et si vous tiriez vraiment parti de votre Galaxy Z Fold 7? "
+                "Alors vous le savez, chez Frandroid, on aime bidouiller.")
+        toks = text.split()
+        words = [W(t, i * 0.3, 0.3) for i, t in enumerate(toks)]
+        cues = segment(words, rules)
+        first = cues[0].text.replace("\n", " ")
+        self.assertTrue(first.rstrip().endswith("7?"), first)
+        self.assertNotIn("Alors", first)
+        self.assertIn("Alors", cues[1].text)
+
+    def test_no_empty_frame_when_no_real_silence(self):
+        rules = SegmentationRules(min_duration=0.1, gap_split=0.6, max_hold_gap=0.5,
+                                  max_chars_per_line=40)
+        words = [W("Oui.", 0.0, 0.3), W("Non.", 0.6, 0.3)]  # écart 0.3 < hold
+        cues = segment(words, rules)
+        self.assertEqual(len(cues), 2)
+        self.assertAlmostEqual(cues[0].end, cues[1].start)  # coupe directe, sans blanc
+
+    def test_keeps_blank_on_real_silence(self):
+        rules = SegmentationRules(min_duration=0.1, gap_split=0.6, max_hold_gap=0.5,
+                                  max_chars_per_line=40)
+        words = [W("Oui.", 0.0, 0.3), W("Non.", 1.4, 0.3)]  # écart 1.1 = vrai silence
+        cues = segment(words, rules)
+        self.assertEqual(len(cues), 2)
+        self.assertLess(cues[0].end, cues[1].start)  # blanc conservé
+
     def test_max_chars_caps_cue(self):
         rules = SegmentationRules(max_chars_per_line=10, gap_split=5.0, max_duration=60)
         words = [W(w, i * 0.2, 0.2) for i, w in enumerate(
