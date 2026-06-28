@@ -12,8 +12,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import os
+import tempfile
+
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover
@@ -21,10 +24,15 @@ except ImportError as exc:  # pragma: no cover
         "FastAPI/pydantic requis pour le serveur : pip install -r requirements.txt"
     ) from exc
 
+from . import config
 from .config import list_presets, load_preset
 from .pipeline import process
 from .serialize import cue_to_dict, word_from_dict, word_to_dict
-from .transcribe import load_premiere_transcript, transcribe_audio
+from .transcribe import (
+    list_engines,
+    load_premiere_transcript,
+    transcribe_audio,
+)
 
 app = FastAPI(title="Coquille", version="0.1.0")
 
@@ -49,6 +57,7 @@ class ProcessRequest(BaseModel):
 class TranscribeRequest(BaseModel):
     audio_path: str
     language: str = "fr"
+    engine: str = "auto"
     initial_prompt: Optional[str] = None
 
 
@@ -90,12 +99,45 @@ def post_process(req: ProcessRequest) -> dict:
     }
 
 
+@app.get("/engines")
+def get_engines() -> dict:
+    """Moteurs de transcription + résolution "auto" pour le matériel courant."""
+    return list_engines()
+
+
 @app.post("/transcribe")
 def post_transcribe(req: TranscribeRequest) -> dict:
+    """Transcrit un fichier déjà présent sur la machine du backend (chemin local)."""
+    engine = req.engine or config.DEFAULT_ENGINE
     try:
         words = transcribe_audio(
-            req.audio_path, language=req.language, initial_prompt=req.initial_prompt
+            req.audio_path,
+            engine=engine,
+            language=req.language,
+            initial_prompt=req.initial_prompt,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+    return {"words": [word_to_dict(w) for w in words]}
+
+
+@app.post("/transcribe-upload")
+async def post_transcribe_upload(
+    file: UploadFile = File(...),
+    engine: str = Form("auto"),
+    language: str = Form("fr"),
+) -> dict:
+    """Transcrit un WAV envoyé par le panneau (cas backend distant / autre machine)."""
+    suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+    try:
+        words = transcribe_audio(
+            tmp_path, engine=engine or config.DEFAULT_ENGINE, language=language
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        os.unlink(tmp_path)
     return {"words": [word_to_dict(w) for w in words]}

@@ -8,7 +8,11 @@
  * On évite la dépendance à CSInterface.js : __adobe_cep__ est injecté par CEP.
  */
 
-var BACKEND = "http://127.0.0.1:8765";
+var CONFIG = window.COQUILLE || {};
+// backendUrl : surchargeable (ex. IP du PC GPU). remoteBackend : si true, le WAV
+// est envoyé en upload (backend sur une autre machine) au lieu d'un chemin local.
+var BACKEND = CONFIG.backendUrl || "http://127.0.0.1:8765";
+var REMOTE = !!CONFIG.remoteBackend;
 
 // ⚠ À CONFIGURER : chemin d'un preset .epr "audio WAV uniquement" exporté depuis
 // Premiere (Fichier ▸ Exporter ▸ Média ▸ régler WAV ▸ Enregistrer le préréglage).
@@ -58,10 +62,35 @@ function http(method, path, body) {
   });
 }
 
+// Upload multipart d'un fichier local (lu via Node fs) → backend distant.
+function httpUpload(path, filePath, fields) {
+  return new Promise(function (resolve, reject) {
+    var buf;
+    try { buf = require("fs").readFileSync(filePath); }
+    catch (e) { reject(new Error("Lecture WAV impossible : " + e.message)); return; }
+    var fd = new FormData();
+    fd.append("file", new Blob([new Uint8Array(buf)]), "audio.wav");
+    Object.keys(fields || {}).forEach(function (k) { fd.append(k, fields[k]); });
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", BACKEND + path, true); // pas de Content-Type : boundary auto
+    xhr.onload = function () {
+      if (xhr.status >= 200 && xhr.status < 300) { resolve(JSON.parse(xhr.responseText)); }
+      else { reject(new Error("HTTP " + xhr.status + " " + path + " : " + xhr.responseText)); }
+    };
+    xhr.onerror = function () { reject(new Error("Backend injoignable (" + BACKEND + ").")); };
+    xhr.send(fd);
+  });
+}
+
 var backend = {
   getPresets: function () { return http("GET", "/presets").then(function (r) { return r.presets; }); },
-  transcribe: function (audioPath) {
-    return http("POST", "/transcribe", { audio_path: audioPath, language: "fr" })
+  getEngines: function () { return http("GET", "/engines"); },
+  transcribe: function (audioPath, engine) {
+    if (REMOTE) {
+      return httpUpload("/transcribe-upload", audioPath, { engine: engine, language: "fr" })
+        .then(function (r) { return r.words; });
+    }
+    return http("POST", "/transcribe", { audio_path: audioPath, language: "fr", engine: engine })
       .then(function (r) { return r.words; });
   },
   process: function (payload) { return http("POST", "/process", payload); }
@@ -76,10 +105,23 @@ function init() {
       opt.value = p.media; opt.textContent = p.label;
       sel.appendChild(opt);
     });
-    setStatus("Prêt.");
+    setStatus("Prêt." + (REMOTE ? " (backend distant)" : ""));
   }).catch(function (e) {
     setStatus("Backend injoignable (lancez uvicorn sur :8765). " + e.message);
   });
+
+  // Sélecteur de moteur de transcription (Auto affiche ce qu'il choisit ici).
+  backend.getEngines().then(function (info) {
+    var sel = $("engine");
+    info.engines.forEach(function (e) {
+      var opt = document.createElement("option");
+      opt.value = e.id;
+      opt.textContent = e.id === "auto"
+        ? e.label + " → " + info.auto_resolves_to + " [" + info.device + "]"
+        : e.label;
+      sel.appendChild(opt);
+    });
+  }).catch(function () { /* backend down : déjà signalé via getPresets */ });
 
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
@@ -92,11 +134,12 @@ function onGenerate() {
   $("insert").disabled = true;
   lastResult = null;
   var media = $("media").value;
+  var engine = $("engine").value || "auto";
   var offline = $("offline").checked;
 
   if (!AUDIO_PRESET_PATH) {
-    setStatus("AUDIO_PRESET_PATH non configuré dans js/main.js — rendu audio impossible. " +
-      "Indiquez un .epr WAV pour activer Whisper.");
+    setStatus("Preset audio non configuré (window.COQUILLE.audioPresetPath dans " +
+      "cep-panel/js/config.local.js) — rendu audio impossible.");
     return;
   }
 
@@ -113,8 +156,8 @@ function onGenerate() {
   evalScript("coquilleExportAudio(" + jsStr(tmpWav) + "," + jsStr(AUDIO_PRESET_PATH) + ",0)")
     .then(function (res) {
       var wav = res.indexOf("OK:") === 0 ? res.slice(3) : tmpWav;
-      setStatus("Transcription Whisper en cours…");
-      return backend.transcribe(wav);
+      setStatus("Transcription (" + engine + ")…");
+      return backend.transcribe(wav, engine);
     })
     .then(function (whisperWords) {
       setStatus("Alignement, correction et segmentation…");

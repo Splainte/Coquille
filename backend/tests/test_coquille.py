@@ -16,7 +16,13 @@ from coquille.models import Cue, Word
 from coquille.pipeline import process
 from coquille.segment import segment, render, _split_lines
 from coquille.srt import to_srt
-from coquille.transcribe import load_premiere_transcript
+from coquille.transcribe import (
+    _fw_segments_to_words,
+    _voxtral_json_to_words,
+    list_engines,
+    load_premiere_transcript,
+    resolve_engine,
+)
 
 
 def W(text, start, dur, conf=None, **kw):
@@ -156,6 +162,59 @@ class TestPremiereTranscript(unittest.TestCase):
         self.assertEqual(words[0].speaker, "Présentateur")
         self.assertEqual(words[1].type, "punctuation")
         self.assertEqual(words[2].confidence, 0.42)
+
+
+class _FWWord:
+    """Imite un mot faster-whisper (attributs .word/.start/.end/.probability)."""
+    def __init__(self, word, start, end, probability=None):
+        self.word, self.start, self.end, self.probability = word, start, end, probability
+
+
+class _FWSegment:
+    def __init__(self, words):
+        self.words = words
+
+
+class TestTranscriptionLayer(unittest.TestCase):
+    def test_resolve_engine_explicit(self):
+        self.assertEqual(resolve_engine("large-v3"), "large-v3")
+        self.assertEqual(resolve_engine("small"), "small")
+        self.assertEqual(resolve_engine("voxtral"), "voxtral")
+
+    def test_resolve_engine_auto_picks_by_hardware(self):
+        # En environnement de test (pas de GPU) → small. Sinon large-v3.
+        self.assertIn(resolve_engine("auto"), ("small", "large-v3"))
+        self.assertEqual(resolve_engine(""), resolve_engine("auto"))
+
+    def test_resolve_engine_unknown_raises(self):
+        with self.assertRaises(ValueError):
+            resolve_engine("gpt-9")
+
+    def test_list_engines_catalog(self):
+        cat = list_engines()
+        ids = {e["id"] for e in cat["engines"]}
+        self.assertEqual(ids, {"auto", "large-v3", "small", "voxtral"})
+        self.assertIn(cat["auto_resolves_to"], ("small", "large-v3"))
+
+    def test_fw_segments_mapping(self):
+        segs = [_FWSegment([
+            _FWWord(" Le", 0.0, 0.3, 0.91),
+            _FWWord(" ", 0.3, 0.3, 0.5),       # blanc → ignoré
+            _FWWord("Pixel", 0.4, 0.8, None),  # sans proba → confidence None
+        ])]
+        words = _fw_segments_to_words(segs)
+        self.assertEqual([w.text for w in words], ["Le", "Pixel"])
+        self.assertAlmostEqual(words[0].duration, 0.3)
+        self.assertEqual(words[0].confidence, 0.91)
+        self.assertIsNone(words[1].confidence)
+
+    def test_voxtral_mapping_words_and_segment_fallback(self):
+        flat = {"words": [{"text": "Bonjour", "start": 0.0, "end": 0.5}]}
+        self.assertEqual([w.text for w in _voxtral_json_to_words(flat)], ["Bonjour"])
+        nested = {"segments": [{"words": [{"word": "Salut", "start": 1.0, "end": 1.4}]}]}
+        out = _voxtral_json_to_words(nested)
+        self.assertEqual(out[0].text, "Salut")
+        self.assertAlmostEqual(out[0].duration, 0.4)
 
 
 class TestPipelineEndToEnd(unittest.TestCase):

@@ -9,5 +9,11 @@
  *   ~/Documents/Adobe/Adobe Media Encoder/<version>/Presets/
  */
 window.COQUILLE = {
-  audioPresetPath: "/Users/<toi>/Documents/Adobe/Adobe Media Encoder/26.0/Presets/Coquille WAV.epr"
+  audioPresetPath: "/Users/<toi>/Documents/Adobe/Adobe Media Encoder/26.0/Presets/Coquille WAV.epr",
+
+  // --- Backend (optionnel) ---
+  // Par défaut le backend est local (http://127.0.0.1:8765, même machine que Premiere).
+  // Pour transcrire sur un PC GPU distant, pointe son IP et active l'upload :
+  // backendUrl: "http://192.168.1.42:8765",
+  // remoteBackend: true
 };

@@ -73,3 +73,13 @@ OPENROUTER_BASE_URL = os.environ.get(
 # Si vrai, on n'appelle pas le réseau : la correction se fait uniquement via le
 # glossaire (déterministe). Pratique pour les tests et le mode hors-ligne.
 CORRECT_OFFLINE = os.environ.get("COQUILLE_CORRECT_OFFLINE", "") == "1"
+
+# --- Transcription ---
+# Moteur par défaut quand le panneau n'en impose pas ("auto" = selon le matériel).
+DEFAULT_ENGINE = os.environ.get("COQUILLE_ENGINE", "auto")
+# Voxtral via l'API Mistral (moteur "voxtral").
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
+MISTRAL_BASE_URL = os.environ.get("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
+MISTRAL_TRANSCRIBE_MODEL = os.environ.get(
+    "MISTRAL_TRANSCRIBE_MODEL", "voxtral-mini-latest"
+)
