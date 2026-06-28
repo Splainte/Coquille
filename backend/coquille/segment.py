@@ -18,8 +18,11 @@ import re
 from .config import SegmentationRules
 from .models import Cue, Word
 
-# Ponctuation qui se colle au mot précédent (pas d'espace avant).
-_TRAILING_PUNCT = re.compile(r"^[,.;:!?…)\]»%»”]")
+# Caractères de tête qui se collent au mot précédent (pas d'espace avant) :
+# ponctuation classique + trait d'union et apostrophe (high-tech, n'allez…).
+_NO_SPACE_BEFORE = re.compile(r"^[-,.;:!?…)\]»%”'’‐]")
+# Caractères de fin de mot après lesquels on ne met pas d'espace (high- + tech).
+_NO_SPACE_AFTER = ("'", "’", "-", "‐")
 # Mots-outils qu'on évite de laisser en fin de ligne (ils « pendent »).
 _DANGLING = {
     "le", "la", "les", "un", "une", "des", "de", "du", "d'", "l'",
@@ -38,7 +41,7 @@ def render(words: list[Word]) -> str:
         tok = w.text
         if not out:
             out = tok
-        elif _TRAILING_PUNCT.match(tok) or out.endswith("'") or out.endswith("’"):
+        elif _NO_SPACE_BEFORE.match(tok) or out.endswith(_NO_SPACE_AFTER):
             out += tok
         else:
             out += " " + tok
@@ -152,8 +155,9 @@ def _score_break(left: list[Word], right: list[Word], max_line: int) -> float:
     # Coupure après un mot-outil → malus (le mot pendrait en fin de ligne).
     if last in _DANGLING or left[-1].text.lower() in _DANGLING:
         score += 8
-    # Coupure juste avant une ponctuation collante → interdit de fait.
-    if _TRAILING_PUNCT.match(first_raw):
+    # Coupure juste avant un caractère collant (ponctuation, trait d'union,
+    # apostrophe) → interdit de fait (ne doit pas démarrer une ligne).
+    if _NO_SPACE_BEFORE.match(first_raw):
         score += 50
     return score
 

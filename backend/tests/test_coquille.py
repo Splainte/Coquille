@@ -172,6 +172,16 @@ class TestRender(unittest.TestCase):
                  W("monde", 0.3, 0.3)]
         self.assertEqual(render(words), "Bonjour, monde")
 
+    def test_hyphen_and_apostrophe_glue(self):
+        # Token suivant à tête '-' ou apostrophe : pas d'espace parasite.
+        self.assertEqual(render([W("high", 0, 0.3), W("-tech", 0.3, 0.3)]), "high-tech")
+        self.assertEqual(render([W("n", 0, 0.2), W("'allez", 0.2, 0.3)]), "n'allez")
+        # Variante tokenisée en trois morceaux.
+        self.assertEqual(
+            render([W("high", 0, 0.2), W("-", 0.2, 0.0), W("tech", 0.2, 0.2)]),
+            "high-tech",
+        )
+
 
 class TestSrt(unittest.TestCase):
     def test_format(self):
