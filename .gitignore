@@ -21,3 +21,6 @@ backend/out/
 
 # Claude Code (local)
 .claude/
+
+# Config machine du panneau (non versionnée)
+cep-panel/js/config.local.js

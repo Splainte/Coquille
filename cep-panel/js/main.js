@@ -12,9 +12,10 @@ var BACKEND = "http://127.0.0.1:8765";
 
 // ⚠ À CONFIGURER : chemin d'un preset .epr "audio WAV uniquement" exporté depuis
 // Premiere (Fichier ▸ Exporter ▸ Média ▸ régler WAV ▸ Enregistrer le préréglage).
-// Sans lui, le rendu audio (donc Whisper) est indisponible — le mode hors-ligne
-// avec un transcript Premiere reste possible une fois ce pont ajouté.
-var AUDIO_PRESET_PATH = "";
+// Config machine = fichier NON versionné cep-panel/js/config.local.js (cf. .example).
+// Sans lui, le rendu audio (donc Whisper) est indisponible.
+var AUDIO_PRESET_PATH =
+  (window.COQUILLE && window.COQUILLE.audioPresetPath) || "";
 
 var $ = function (id) { return document.getElementById(id); };
 var setStatus = function (msg) { $("status").textContent = msg; };
@@ -83,6 +84,7 @@ function init() {
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
   $("diag").addEventListener("click", onDiagnostic);
+  $("testInsert").addEventListener("click", onTestInsert);
 }
 
 // --- Flux génération --------------------------------------------------------
@@ -141,23 +143,37 @@ function renderCues(cues) {
 }
 
 // --- Flux insertion ---------------------------------------------------------
-function onInsert() {
-  if (!lastResult) return;
-  var srt = lastResult.srt;
+// Écrit le SRT en fichier temporaire puis appelle createCaptionTrack côté hôte.
+function insertSrt(srtText, styleName) {
   var fs, os, pathmod, srtPath;
   try {
     fs = require("fs"); os = require("os"); pathmod = require("path");
     srtPath = pathmod.join(os.tmpdir(), "coquille-" + Date.now() + ".srt");
-    fs.writeFileSync(srtPath, srt, "utf8");
+    fs.writeFileSync(srtPath, srtText, "utf8");
   } catch (e) { setStatus("Écriture SRT impossible : " + e.message); return; }
 
   setStatus("Insertion de la piste de sous-titres…");
   evalScript("coquilleInsertCaptions(" + jsStr(srtPath) + ",0)")
     .then(function () {
-      setStatus("Piste insérée. Appliquez le Track Style « " + lastResult.track_style +
-        " » sur la piste de sous-titres.");
+      setStatus("Piste insérée." +
+        (styleName ? " Appliquez le Track Style « " + styleName + " »." : ""));
     })
     .catch(function (e) { setStatus("Erreur d'insertion : " + e.message); });
+}
+
+function onInsert() {
+  if (!lastResult) return;
+  insertSrt(lastResult.srt, lastResult.track_style);
+}
+
+// Insertion d'un SRT factice — valide createCaptionTrack sans backend ni Whisper.
+function onTestInsert() {
+  var srt = [
+    "1", "00:00:00,000 --> 00:00:02,500", "Coquille — test d'insertion", "",
+    "2", "00:00:02,500 --> 00:00:05,000", "Si ce texte apparaît dans la timeline,", "",
+    "3", "00:00:05,000 --> 00:00:07,500", "createCaptionTrack fonctionne. ✅", ""
+  ].join("\n");
+  insertSrt(srt, null);
 }
 
 // --- Diagnostic du spike ----------------------------------------------------
