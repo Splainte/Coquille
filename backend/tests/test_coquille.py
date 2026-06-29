@@ -205,6 +205,41 @@ class TestSegment(unittest.TestCase):
         for a, b in zip(cues, cues[1:]):
             self.assertLessEqual(a.end, b.start)  # aucun chevauchement
 
+    def test_reflow_merges_orphan_fragment(self):
+        # Une phrase fragmentée par des micro-pauses ne doit pas laisser de mot
+        # seul (« Galaxy, » / « Et oui, ») : on recolle au voisin de la phrase.
+        rules = SegmentationRules(max_chars_per_line=24, max_duration=6.0,
+                                  min_duration=0.1, gap_split=0.6)
+        toks = ["Et", "oui,", "si", "vous", "avez", "un", "smartphone",
+                "Samsung", "Galaxy,", "ce", "sont", "des", "puces"]
+        t = 0.0; words = []
+        for tk in toks:
+            if tk in ("si", "Galaxy,"):
+                t += 0.7  # micro-pause (≥ gap_split mais pas un vrai silence)
+            words.append(W(tk, t, 0.3)); t += 0.33
+        cues = segment(words, rules)
+        for c in cues:
+            words_in = " ".join(c.lines).split()
+            self.assertGreater(len(words_in), 1, "cue orphelin : " + c.text)
+
+    def test_real_silence_keeps_split(self):
+        # Un vrai silence (long) NE doit PAS être recollé, même si court.
+        rules = SegmentationRules(max_chars_per_line=24, min_duration=0.1, gap_split=0.6)
+        words = [W("Bonjour,", 0.0, 0.4), W("alors", 5.0, 0.3), W("on", 5.3, 0.2),
+                 W("y", 5.5, 0.2), W("va.", 5.7, 0.3)]  # silence de ~4.6 s
+        cues = segment(words, rules)
+        self.assertEqual(cues[0].text.strip().rstrip(), "Bonjour,")
+
+    def test_no_single_word_on_second_line(self):
+        # « à ses fonctionnalités IA. » (max 24) ne doit pas isoler « IA. ».
+        rules = SegmentationRules(max_chars_per_line=24)
+        words = [W(t, i * 0.4, 0.4) for i, t in enumerate(
+            ["à", "ses", "fonctionnalités", "IA."])]
+        lines = _split_lines(words, rules)
+        self.assertEqual(len(lines), 2)
+        for ln in lines:
+            self.assertGreater(len(ln.split()), 1, "ligne d'un seul mot : " + ln)
+
     def test_split_lines_picks_most_balanced(self):
         # 2 lignes : on veut l'équilibre, pas "presque tout puis un reste".
         rules = SegmentationRules(max_chars_per_line=24)

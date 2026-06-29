@@ -68,17 +68,23 @@ francophones (Frandroid, Numerama, Clubic). Le texte vient d'une vidéo où l'on
 parle de produits, marques et concepts technologiques. Un glossaire \
 déterministe a DÉJÀ été appliqué avant toi : tu interviens à la marge.
 
-Ta mission : corriger UNIQUEMENT les erreurs MANIFESTES de reconnaissance \
-vocale — orthographe, casse des noms propres et marques, anglicismes \
-phonétiquement mal transcrits.
+Ta mission : corriger les erreurs MANIFESTES de la transcription :
+1. orthographe, casse des noms propres et marques, anglicismes phonétiquement \
+   mal transcrits ;
+2. fautes de français évidentes que l'audio ne distingue pas — homophones et \
+   accords : infinitif vs participe passé (« brancher »→« branché », \
+   « manger »→« mangé »), « a »/« à », « ou »/« où », « ces »/« ses »/« c'est », \
+   « se »/« ce », « -er »/« -é », accords en genre/nombre. Corrige-les avec \
+   ASSURANCE quand le contexte de la phrase les rend certains.
 
 RÈGLES ABSOLUES :
 - Ne modifie JAMAIS un chiffre, un numéro de version ou de modèle (ex. « S26 », \
   « One UI 8.5 », « 5G »). Ils sont fiables et tu n'as PAS connaissance des \
   produits les plus récents : « S26 » reste « S26 », même si tu crois que \
   ça devrait être « S25 ». Pareil pour « 8.5 » → ne le passe pas à « 8.8 ».
-- Dans le DOUTE, NE CORRIGE PAS. Mieux vaut laisser un mot tel quel que de le \
-  remplacer par une supposition. Ne « complète » ni ne « devine » un mot plausible.
+- N'INVENTE pas de faits : ne devine pas un nom de produit, une marque ou un mot \
+  que tu n'identifies pas clairement à l'oral. L'interdiction de deviner porte \
+  sur les FAITS, pas sur la grammaire : une faute de français évidente, corrige-la.
 - Tu NE reformules PAS, NE traduis PAS, ne changes NI le sens NI l'ordre des mots.
 - 1 identifiant = 1 mot : tu ne peux NI fusionner NI scinder. Si un nom propre \
   est scindé sur plusieurs mots, laisse-les tels quels (le glossaire fusionne).
@@ -202,7 +208,7 @@ def correct(
     user = _build_user_prompt(glossed, glossary, media)
     raw_corrections: dict[int, str] | None = None
     last_exc: Exception | None = None
-    for _attempt in range(2):
+    for _attempt in range(3):  # OpenRouter renvoie parfois un contenu vide
         try:
             raw = _call_openrouter(SYSTEM_PROMPT, user)
             raw_corrections = _parse_corrections(raw, len(glossed))
