@@ -72,10 +72,15 @@ class Glossary:
             text = pattern.sub(canonical, text)
         return text
 
-    def apply_words(self, words: list[Word]) -> list[Word]:
+    def apply_words(
+        self, words: list[Word], trace: list[dict] | None = None
+    ) -> list[Word]:
         """Version timing-safe : remplace les aliases (y compris multi-mots) en
         préservant les timecodes. Un alias multi-mots fusionne les `Word`
-        correspondants en un seul, couvrant tout leur intervalle de temps."""
+        correspondants en un seul, couvrant tout leur intervalle de temps.
+
+        Si `trace` est fourni, chaque remplacement qui change réellement le texte
+        y est journalisé : {original, corrected, start}."""
         # (tuple de tokens normalisés de l'alias) -> forme canonique
         entries: list[tuple[tuple[str, ...], str]] = []
         for t in self.terms:
@@ -101,6 +106,14 @@ class Glossary:
                 if window == list(toks):
                     first, last = words[i], words[i + n - 1]
                     confs = [w.confidence for w in words[i : i + n] if w.confidence is not None]
+                    if trace is not None:
+                        original = " ".join(words[i + k].text for k in range(n))
+                        if original != canonical:
+                            trace.append({
+                                "original": original,
+                                "corrected": canonical,
+                                "start": first.start,
+                            })
                     out.append(
                         Word(
                             text=canonical,

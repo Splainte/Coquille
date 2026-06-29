@@ -30,6 +30,16 @@ _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
 
 @dataclass
+class Correction:
+    """Une correction unitaire, pour affichage dans le panneau (lien « localiser »)."""
+
+    original: str
+    corrected: str        # "" = mot supprimé (parasite)
+    start: float          # timecode (s) du mot — sert au déplacement de la tête
+    source: str           # "glossary" | "llm"
+
+
+@dataclass
 class CorrectionResult:
     """Résultat de la passe de correction (pour remontée au panneau)."""
 
@@ -39,6 +49,7 @@ class CorrectionResult:
     n_corrections: int = 0          # nb de mots modifiés par le LLM (hors glossaire)
     error: str | None = None        # raison du repli glossaire si le LLM a échoué
     warnings: list[str] = field(default_factory=list)
+    items: list[Correction] = field(default_factory=list)  # détail (glossaire + LLM)
 
 SYSTEM_PROMPT = """\
 Tu es correcteur de transcriptions pour des médias high-tech francophones \
@@ -130,14 +141,6 @@ def _parse_corrections(raw: str, n_words: int) -> dict[int, str]:
     return corrections
 
 
-def _count_real_corrections(words: list[Word], corrections: dict[int, str]) -> int:
-    """Nombre de corrections qui changent réellement un mot (≠ texte d'origine)."""
-    return sum(
-        1 for i, text in corrections.items()
-        if 0 <= i < len(words) and text != words[i].text
-    )
-
-
 def correct(
     words: list[Word],
     glossary: Glossary,
@@ -151,12 +154,17 @@ def correct(
     d'échec (réseau, JSON illisible…) on **dégrade gracieusement** vers le seul
     résultat glossaire : on ne perd jamais la transcription pour un hoquet LLM.
     """
-    # 1. Pré-passe glossaire (déterministe, multi-mots, timing-safe).
-    glossed = glossary.apply_words([replace(w) for w in words])
+    # 1. Pré-passe glossaire (déterministe, multi-mots, timing-safe), tracée.
+    gloss_trace: list[dict] = []
+    glossed = glossary.apply_words([replace(w) for w in words], trace=gloss_trace)
+    gloss_items = [
+        Correction(t["original"], t["corrected"], t["start"], "glossary")
+        for t in gloss_trace
+    ]
 
     offline = config.CORRECT_OFFLINE if offline is None else offline
     if offline or not config.OPENROUTER_API_KEY:
-        return CorrectionResult(words=glossed, used_llm=False)
+        return CorrectionResult(words=glossed, used_llm=False, items=gloss_items)
 
     # 2-3. Correction LLM par identifiant — protégée contre toute exception.
     try:
@@ -170,12 +178,18 @@ def correct(
             model=config.OPENROUTER_MODEL,
             error=f"{type(exc).__name__}: {exc}",
             warnings=["Correction LLM indisponible : repli sur le glossaire."],
+            items=gloss_items,
         )
 
-    n = _count_real_corrections(glossed, corrections)
+    llm_items = [
+        Correction(glossed[i].text, text, glossed[i].start, "llm")
+        for i, text in sorted(corrections.items())
+        if 0 <= i < len(glossed) and text != glossed[i].text
+    ]
     return CorrectionResult(
         words=_apply_corrections(glossed, corrections),
         used_llm=True,
         model=config.OPENROUTER_MODEL,
-        n_corrections=n,
+        n_corrections=len(llm_items),
+        items=gloss_items + llm_items,
     )

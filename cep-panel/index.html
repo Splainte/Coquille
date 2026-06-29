@@ -16,6 +16,17 @@
       .cue .tc { color: #7ab; }
       .cue textarea { width: 100%; box-sizing: border-box; background: #2a2a2a; color: #eee; border: 1px solid #444; font-size: 13px; }
 
+      /* Section repliable des corrections */
+      details.corr { font-size: 11px; margin: 4px 0 10px; border-top: 1px solid #444; padding-top: 6px; }
+      details.corr summary { cursor: pointer; color: #cdd; user-select: none; }
+      details.corr .item { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
+      .corr .orig { color: #c88; text-decoration: line-through; }
+      .corr .arrow { color: #777; }
+      .corr .new { color: #8c8; }
+      .corr .src { color: #777; font-size: 10px; }
+      .corr .loc { color: #7ab; cursor: pointer; text-decoration: underline; margin-left: auto; white-space: nowrap; }
+      .corr .loc:hover { color: #9cf; }
+
       /* Spinner d'attente (transcription). La passe LLM aura plus tard sa propre
          animation aux codes « IA ». */
       .spinner { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid #444;
@@ -54,6 +65,7 @@
       <div id="spinner" class="spinner hidden"></div>
       <div id="status"></div>
     </div>
+    <div id="corrections"></div>
     <div id="cues"></div>
 
     <div class="row">

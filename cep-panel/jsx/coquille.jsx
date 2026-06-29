@@ -83,6 +83,22 @@ function coquilleInsertCaptions(srtPath, startAtTimeSeconds) {
   return "OK:1";
 }
 
+// --- Déplacement de la tête de lecture (lien « localiser » du panneau) -------
+// Premiere compte le temps en ticks : 254016000000 ticks = 1 seconde.
+// setPlayerPosition attend une chaîne de ticks.
+function coquilleSeek(seconds) {
+  if (!app.project) { return "ERREUR: aucun projet ouvert"; }
+  var seq = app.project.activeSequence;
+  if (!seq) { return "ERREUR: aucune séquence active"; }
+  var ticks = Math.round((Number(seconds) || 0) * 254016000000);
+  try {
+    seq.setPlayerPosition(ticks.toString());
+  } catch (e) {
+    return "ERREUR: setPlayerPosition: " + e.toString();
+  }
+  return "OK:" + seconds;
+}
+
 // --- 3. Sonde de capacités (diagnostic du spike) ----------------------------
 // Renvoie un JSON décrivant ce qui est réellement disponible dans CET hôte.
 function coquilleProbe() {

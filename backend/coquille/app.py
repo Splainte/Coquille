@@ -111,6 +111,15 @@ def post_process(req: ProcessRequest) -> dict:
             "n_corrections": corr.n_corrections,
             "error": corr.error,
             "warnings": corr.warnings,
+            "items": [
+                {
+                    "original": it.original,
+                    "corrected": it.corrected,
+                    "start": round(it.start, 3),
+                    "source": it.source,
+                }
+                for it in corr.items
+            ],
         } if corr else None,
     }
 

@@ -11,7 +11,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coquille import config, correct as correct_mod
-from coquille.correct import CorrectionResult, _parse_corrections, correct
+from coquille.correct import Correction, CorrectionResult, _parse_corrections, correct
 from coquille.align import align
 from coquille.config import SegmentationRules, load_preset, list_presets
 from coquille.glossary import load_glossary, Glossary, Term
@@ -51,6 +51,22 @@ class TestGlossary(unittest.TestCase):
         words = [W("iphone", 0.0, 0.3), W("wifi", 0.3, 0.3)]
         out = self.g.apply_words(words)
         self.assertEqual([w.text for w in out], ["iPhone", "Wi-Fi"])
+
+    def test_apply_words_trace_records_changes(self):
+        words = [W("le", 0.0, 0.2), W("i", 0.2, 0.2), W("phone", 0.4, 0.3)]
+        trace = []
+        self.g.apply_words(words, trace=trace)
+        self.assertEqual(len(trace), 1)
+        self.assertEqual(trace[0]["original"], "i phone")
+        self.assertEqual(trace[0]["corrected"], "iPhone")
+        self.assertAlmostEqual(trace[0]["start"], 0.2)
+
+    def test_apply_words_trace_skips_noop(self):
+        # déjà bien orthographié : aucune correction à journaliser
+        words = [W("iPhone", 0.0, 0.3)]
+        trace = []
+        self.g.apply_words(words, trace=trace)
+        self.assertEqual(trace, [])
 
     def test_real_glossaries_load(self):
         for media in ("frandroid", "numerama", "clubic"):
@@ -395,6 +411,28 @@ class TestCorrectLLM(unittest.TestCase):
         called.assert_not_called()
         self.assertFalse(res.used_llm)
         self.assertEqual([w.text for w in res.words], ["AMOLED"])
+
+    def test_items_combine_glossary_and_llm_with_source_and_tc(self):
+        words = [W("a", 0.0, 0.2), W("moled", 0.2, 0.4), W("pixelle", 0.6, 0.4)]
+        # le glossaire fusionne "a moled" -> "AMOLED" : "pixelle" passe en id 1,
+        # c'est l'indexation APRÈS glossaire que voit le LLM.
+        raw = '{"words": [{"id": 1, "text": "Pixel"}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid")
+        by_src = {it.source: it for it in res.items}
+        self.assertEqual(by_src["glossary"].corrected, "AMOLED")
+        self.assertAlmostEqual(by_src["glossary"].start, 0.0)
+        self.assertEqual(by_src["llm"].original, "pixelle")
+        self.assertEqual(by_src["llm"].corrected, "Pixel")
+        self.assertAlmostEqual(by_src["llm"].start, 0.6)
+
+    def test_items_present_on_llm_failure(self):
+        words = [W("a", 0.0, 0.2), W("moled", 0.2, 0.4)]
+        boom = mock.Mock(side_effect=RuntimeError("ko"))
+        with mock.patch.object(correct_mod, "_call_openrouter", boom):
+            res = correct(words, self.g, "frandroid")
+        # même en repli, la correction glossaire est listée
+        self.assertEqual([it.corrected for it in res.items], ["AMOLED"])
 
 
 class TestPipelineEndToEnd(unittest.TestCase):

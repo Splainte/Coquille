@@ -161,6 +161,7 @@ function init() {
 function onGenerate() {
   $("insert").disabled = true;
   lastResult = null;
+  $("corrections").innerHTML = "";
   var media = $("media").value;
   var engine = $("engine").value || "auto";
   var offline = $("offline").checked;
@@ -202,6 +203,7 @@ function onGenerate() {
     .then(function (result) {
       setBusy(false);
       lastResult = result;
+      renderCorrections(result.correction);
       renderCues(result.cues);
       setStatus(
         result.cues.length + " sous-titres générés. " +
@@ -216,13 +218,59 @@ function onGenerate() {
 // Résumé lisible de la passe de correction pour la barre de statut.
 function correctionSummary(c) {
   if (!c) return "";
+  var total = (c.items && c.items.length) || 0;
   if (c.error) {
-    return "⚠ LLM indisponible (glossaire seul) — " + c.error + ". ";
+    return "⚠ LLM indisponible (glossaire seul, " + total + " corr.) — " + c.error + ". ";
   }
   if (c.used_llm) {
-    return c.n_corrections + " correction(s) LLM (" + (c.model || "?") + "). ";
+    return total + " correction(s) dont " + c.n_corrections + " LLM (" +
+      (c.model || "?") + "). ";
   }
-  return "Glossaire seul (mode hors-ligne). ";
+  return total + " correction(s) glossaire (hors-ligne). ";
+}
+
+// Timecode lisible (m:ss.s) pour le lien « localiser ».
+function fmtTc(s) {
+  var m = Math.floor(s / 60), sec = s - m * 60;
+  return m + ":" + (sec < 10 ? "0" : "") + sec.toFixed(1);
+}
+
+// Déplace la tête de lecture de la séquence active sur le mot corrigé.
+function seekTo(seconds) {
+  evalScript("coquilleSeek(" + Number(seconds) + ")").catch(function (e) {
+    setStatus("Localisation impossible : " + e.message);
+  });
+}
+
+// Section repliable « Corrections (N) ». DOM construit à la main (textContent)
+// pour ne pas injecter de HTML issu du texte corrigé.
+function renderCorrections(corr) {
+  var box = $("corrections");
+  box.innerHTML = "";
+  if (!corr || !corr.items || !corr.items.length) return;
+
+  var det = document.createElement("details");
+  det.className = "corr";
+  var sum = document.createElement("summary");
+  sum.textContent = "Corrections (" + corr.items.length + ")";
+  det.appendChild(sum);
+
+  corr.items.forEach(function (it) {
+    var row = document.createElement("div"); row.className = "item";
+    var o = document.createElement("span"); o.className = "orig"; o.textContent = it.original;
+    var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
+    var n = document.createElement("span"); n.className = "new";
+    n.textContent = it.corrected === "" ? "(supprimé)" : it.corrected;
+    var s = document.createElement("span"); s.className = "src";
+    s.textContent = it.source === "llm" ? "LLM" : "gloss";
+    var loc = document.createElement("span"); loc.className = "loc";
+    loc.textContent = "localiser " + fmtTc(it.start);
+    loc.addEventListener("click", function () { seekTo(it.start); });
+    row.appendChild(o); row.appendChild(a); row.appendChild(n);
+    row.appendChild(s); row.appendChild(loc);
+    det.appendChild(row);
+  });
+  box.appendChild(det);
 }
 
 function renderCues(cues) {
