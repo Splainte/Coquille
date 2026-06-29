@@ -91,6 +91,7 @@ RÈGLES ABSOLUES :
 - Respecte la casse et l'orthographe du glossaire fourni.
 
 Format de sortie (STRICT) :
+- Réponds UNIQUEMENT par le JSON, sans aucun texte ni raisonnement avant/après.
 - JSON {"words": [{"id": <int>, "text": "<corrigé>"}, ...]}.
 - N'inclus QUE les mots que tu modifies réellement.
 - Un seul mot par identifiant (pas de fusion/découpe).
@@ -131,6 +132,36 @@ def _apply_corrections(words: list[Word], corrections: dict[int, str]) -> list[W
     return out
 
 
+# Outil imposé au modèle : garantit une sortie STRUCTURÉE (JSON conforme au
+# schéma), au lieu de prose. response_format=json_object n'est pas respecté par
+# les modèles Anthropic via OpenRouter, et le prefill assistant n'est pas
+# supporté par sonnet-4.6 → le tool calling forcé est la voie fiable.
+_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "soumettre_corrections",
+        "description": "Soumet la liste des mots corrigés (id + texte corrigé).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "words": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "integer"},
+                            "text": {"type": "string"},
+                        },
+                        "required": ["id", "text"],
+                    },
+                }
+            },
+            "required": ["words"],
+        },
+    },
+}
+
+
 def _call_openrouter(system: str, user: str) -> str:
     import httpx  # importé à la demande pour ne pas l'exiger en mode hors-ligne
 
@@ -143,7 +174,12 @@ def _call_openrouter(system: str, user: str) -> str:
     payload = {
         "model": config.OPENROUTER_MODEL,
         "temperature": 0.1,
-        "response_format": {"type": "json_object"},
+        "max_tokens": 4096,
+        "tools": [_TOOL],
+        "tool_choice": {
+            "type": "function",
+            "function": {"name": "soumettre_corrections"},
+        },
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -156,7 +192,11 @@ def _call_openrouter(system: str, user: str) -> str:
             json=payload,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        msg = resp.json()["choices"][0]["message"]
+        tool_calls = msg.get("tool_calls") or []
+        if tool_calls:
+            return tool_calls[0]["function"]["arguments"]
+        return msg.get("content") or ""  # repli (modèle non conforme)
 
 
 def _parse_corrections(raw: str, n_words: int) -> dict[int, str]:
