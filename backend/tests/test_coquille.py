@@ -137,7 +137,8 @@ class TestSegment(unittest.TestCase):
         words = [W(t, i * 0.3, 0.3) for i, t in enumerate(toks)]
         cues = segment(words, rules)
         first = cues[0].text.replace("\n", " ")
-        self.assertTrue(first.rstrip().endswith("7?"), first)
+        # Typo FR : espace insécable avant le "?" (cf. test_french_spacing_*).
+        self.assertTrue(first.rstrip().endswith("7\u00A0?"), first)
         self.assertNotIn("Alors", first)
         self.assertIn("Alors", cues[1].text)
 
@@ -216,6 +217,21 @@ class TestRender(unittest.TestCase):
         words = [W("Bonjour", 0, 0.3), W(",", 0.3, 0.0, type="punctuation"),
                  W("monde", 0.3, 0.3)]
         self.assertEqual(render(words), "Bonjour, monde")
+
+    def test_french_spacing_before_high_punctuation(self):
+        # Typo FR : espace insécable avant ? ! ; : (collé OU token séparé).
+        nbsp = "\u00A0"
+        self.assertEqual(render([W("Fold", 0, 0.3), W("7?", 0.3, 0.3)]),
+                         "Fold 7" + nbsp + "?")
+        self.assertEqual(render([W("Quoi", 0, 0.3), W("?", 0.3, 0.0)]),
+                         "Quoi" + nbsp + "?")
+        self.assertEqual(render([W("Génial", 0, 0.3), W("!", 0.3, 0.0)]),
+                         "Génial" + nbsp + "!")
+        self.assertEqual(render([W("Attention", 0, 0.3), W(":", 0.3, 0.0),
+                                 W("danger", 0.3, 0.3)]),
+                         "Attention" + nbsp + ": danger")
+        # Une heure (chiffres) ne prend pas d'espace avant ":".
+        self.assertEqual(render([W("à", 0, 0.2), W("10:30", 0.2, 0.3)]), "à 10:30")
 
     def test_hyphen_and_apostrophe_glue(self):
         # Token suivant à tête '-' ou apostrophe : pas d'espace parasite.

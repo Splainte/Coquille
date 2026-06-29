@@ -23,6 +23,24 @@ from .models import Cue, Word
 _NO_SPACE_BEFORE = re.compile(r"^[-,.;:!?…)\]»%”'’‐]")
 # Caractères de fin de mot après lesquels on ne met pas d'espace (high- + tech).
 _NO_SPACE_AFTER = ("'", "’", "-", "‐")
+
+# Espacement typographique français : espace INSÉCABLE (U+00A0) avant la
+# ponctuation « haute » (? ! ; :) et avant », après «. Insécable → le signe ne
+# part jamais seul en début de ligne. ":" épargné entre chiffres (heures 10:30).
+_NBSP = "\u00A0"
+_FR_HIGH = re.compile("(?<=\\S)[ \u00A0]*([!?;]+)")
+_FR_COLON = re.compile("(?<=\\S)[ \u00A0]*:(?!\\d)")
+_FR_GUILLEMET_CLOSE = re.compile("(?<=\\S)[ \u00A0]*\u00bb")
+_FR_GUILLEMET_OPEN = re.compile("\u00ab[ \u00A0]*(?=\\S)")
+
+
+def _french_spacing(s: str) -> str:
+    """Applique l'espacement typographique français (espaces insécables)."""
+    s = _FR_HIGH.sub(_NBSP + r"\1", s)
+    s = _FR_COLON.sub(_NBSP + ":", s)
+    s = _FR_GUILLEMET_CLOSE.sub(_NBSP + "\u00bb", s)
+    s = _FR_GUILLEMET_OPEN.sub("\u00ab" + _NBSP, s)
+    return s
 # Mots-outils qu'on évite de laisser en fin de ligne (ils « pendent »).
 _DANGLING = {
     "le", "la", "les", "un", "une", "des", "de", "du", "d'", "l'",
@@ -58,7 +76,7 @@ def render(words: list[Word]) -> str:
             out += tok
         else:
             out += " " + tok
-    return out
+    return _french_spacing(out)
 
 
 def _wrap_greedy(words: list[Word], max_line: int) -> list[str]:
