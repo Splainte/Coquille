@@ -52,22 +52,32 @@ class CorrectionResult:
     items: list[Correction] = field(default_factory=list)  # détail (glossaire + LLM)
 
 SYSTEM_PROMPT = """\
-Tu es correcteur de transcriptions pour des médias high-tech francophones \
-(Frandroid, Numerama, Clubic). On te donne une transcription automatique \
-découpée en mots numérotés, issue d'une vidéo où l'on parle de produits, \
-marques et concepts technologiques (souvent en anglais).
+Tu es correcteur de transcriptions automatiques pour des médias high-tech \
+francophones (Frandroid, Numerama, Clubic). Le texte vient d'une vidéo où l'on \
+parle de produits, marques et concepts technologiques. Un glossaire \
+déterministe a DÉJÀ été appliqué avant toi : tu interviens à la marge.
 
-Ta mission : corriger UNIQUEMENT les erreurs de reconnaissance vocale — \
-orthographe, casse des noms propres et marques, anglicismes mal transcrits, \
-ponctuation évidente. Tu NE reformules PAS, tu NE traduis PAS, tu NE changes \
-PAS le sens ni l'ordre des mots.
+Ta mission : corriger UNIQUEMENT les erreurs MANIFESTES de reconnaissance \
+vocale — orthographe, casse des noms propres et marques, anglicismes \
+phonétiquement mal transcrits.
 
-Contraintes STRICTES de sortie :
-- Tu renvoies un JSON {"words": [{"id": <int>, "text": "<corrigé>"}, ...]}.
-- Un seul objet par identifiant fourni, dans le même ordre.
-- N'inclus QUE les mots que tu modifies (les autres restent inchangés).
-- Garde un seul mot par identifiant (pas de fusion/découpe).
-- Mets "" comme text pour supprimer un mot parasite (hésitation, répétition).
+RÈGLES ABSOLUES :
+- Ne modifie JAMAIS un chiffre, un numéro de version ou de modèle (ex. « S26 », \
+  « One UI 8.5 », « 5G »). Ils sont fiables et tu n'as PAS connaissance des \
+  produits les plus récents : « S26 » reste « S26 », même si tu crois que \
+  ça devrait être « S25 ». Pareil pour « 8.5 » → ne le passe pas à « 8.8 ».
+- Dans le DOUTE, NE CORRIGE PAS. Mieux vaut laisser un mot tel quel que de le \
+  remplacer par une supposition. Ne « complète » ni ne « devine » un mot plausible.
+- Tu NE reformules PAS, NE traduis PAS, ne changes NI le sens NI l'ordre des mots.
+- 1 identifiant = 1 mot : tu ne peux NI fusionner NI scinder. Si un nom propre \
+  est scindé sur plusieurs mots, laisse-les tels quels (le glossaire fusionne).
+- Respecte la casse et l'orthographe du glossaire fourni.
+
+Format de sortie (STRICT) :
+- JSON {"words": [{"id": <int>, "text": "<corrigé>"}, ...]}.
+- N'inclus QUE les mots que tu modifies réellement.
+- Un seul mot par identifiant (pas de fusion/découpe).
+- "" comme text pour supprimer un mot parasite évident (hésitation « euh »).
 """
 
 
@@ -84,6 +94,11 @@ def _build_user_prompt(words: list[Word], glossary: Glossary, media: str) -> str
         f"Les mots marqués ⚠FAIBLE ont une confiance basse : examine-les en priorité.\n\n"
         f"Transcription (id<TAB>mot) :\n" + "\n".join(items)
     )
+
+
+def _digits(s: str) -> str:
+    """Suite des chiffres d'une chaîne (pour comparer S26 vs S25, 8.5 vs 8.8)."""
+    return "".join(ch for ch in s if ch.isdigit())
 
 
 def _apply_corrections(words: list[Word], corrections: dict[int, str]) -> list[Word]:
@@ -170,7 +185,7 @@ def correct(
     try:
         user = _build_user_prompt(glossed, glossary, media)
         raw = _call_openrouter(SYSTEM_PROMPT, user)
-        corrections = _parse_corrections(raw, len(glossed))
+        raw_corrections = _parse_corrections(raw, len(glossed))
     except Exception as exc:  # réseau, HTTP, JSON, clé invalide…
         return CorrectionResult(
             words=glossed,
@@ -181,15 +196,36 @@ def correct(
             items=gloss_items,
         )
 
+    # Garde-fou déterministe : le LLM n'a JAMAIS le droit de modifier les chiffres
+    # (S26→S25, 8.5→8.8…). L'audio transcrit les nombres de façon fiable, et le
+    # modèle a tendance à les « corriger » vers ce qu'il croit savoir.
+    corrections: dict[int, str] = {}
+    rejected = 0
+    for i, text in raw_corrections.items():
+        if not (0 <= i < len(glossed)):
+            continue
+        if _digits(text) != _digits(glossed[i].text):
+            rejected += 1
+            continue
+        corrections[i] = text
+
+    warnings: list[str] = []
+    if rejected:
+        warnings.append(
+            f"{rejected} correction(s) LLM ignorée(s) : modification de chiffres "
+            f"interdite (numéros de version/modèle protégés)."
+        )
+
     llm_items = [
         Correction(glossed[i].text, text, glossed[i].start, "llm")
         for i, text in sorted(corrections.items())
-        if 0 <= i < len(glossed) and text != glossed[i].text
+        if text != glossed[i].text
     ]
     return CorrectionResult(
         words=_apply_corrections(glossed, corrections),
         used_llm=True,
         model=config.OPENROUTER_MODEL,
         n_corrections=len(llm_items),
+        warnings=warnings,
         items=gloss_items + llm_items,
     )

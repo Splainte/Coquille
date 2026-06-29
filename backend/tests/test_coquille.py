@@ -85,6 +85,13 @@ class TestGlossary(unittest.TestCase):
             # le glossaire de base est fusionné
             self.assertIn("iPhone", g.canonical_list())
 
+    def test_media_names_merge_multiword(self):
+        # « fran droïde » (2 mots) -> « Frandroid » (fusion multi-mots du glossaire)
+        g = load_glossary("frandroid")
+        words = [W("sur", 0.0, 0.2), W("fran", 0.2, 0.2), W("droïde", 0.4, 0.3)]
+        out = g.apply_words(words)
+        self.assertEqual([w.text for w in out], ["sur", "Frandroid"])
+
 
 class TestAlign(unittest.TestCase):
     def test_borrows_premiere_timecodes_on_match(self):
@@ -435,6 +442,30 @@ class TestCorrectLLM(unittest.TestCase):
         self.assertEqual(by_src["llm"].original, "pixelle")
         self.assertEqual(by_src["llm"].corrected, "Pixel")
         self.assertAlmostEqual(by_src["llm"].start, 0.6)
+
+    def test_llm_cannot_change_digits(self):
+        # S26 -> S25 et 8.5 -> 8.8 doivent être rejetés (chiffres protégés)
+        words = [W("S26", 0.0, 0.3), W("OneUI", 0.4, 0.3), W("8.5", 0.7, 0.3)]
+        raw = ('{"words": [{"id": 0, "text": "S25"}, '
+               '{"id": 2, "text": "8.8"}]}')
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid")
+        texts = [w.text for w in res.words]
+        self.assertIn("S26", texts)        # inchangé
+        self.assertIn("8.5", texts)        # inchangé
+        self.assertNotIn("S25", texts)
+        self.assertNotIn("8.8", texts)
+        self.assertEqual(res.n_corrections, 0)
+        self.assertTrue(res.warnings)      # garde-fou signalé
+
+    def test_llm_casing_with_digits_allowed(self):
+        # la casse autour d'un chiffre reste permise (mêmes chiffres)
+        words = [W("iphone15", 0.0, 0.3)]
+        raw = '{"words": [{"id": 0, "text": "iPhone15"}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid")
+        self.assertEqual([w.text for w in res.words], ["iPhone15"])
+        self.assertFalse(res.warnings)
 
     def test_items_present_on_llm_failure(self):
         words = [W("a", 0.0, 0.2), W("moled", 0.2, 0.4)]

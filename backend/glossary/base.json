@@ -1,6 +1,10 @@
 {
   "_comment": "Glossaire commun aux trois médias. canonical = forme/casse correcte ; aliases = erreurs fréquentes de transcription (multi-mots autorisés). Étendre au fil des corrections manuelles récurrentes.",
   "terms": [
+    { "canonical": "Frandroid", "aliases": ["fran droïde", "fran droide", "frandroïde", "frandroide", "franc droïde"], "note": "le média (un seul mot)" },
+    { "canonical": "Numerama", "aliases": ["numérama", "numéramat", "new merama"], "note": "le média" },
+    { "canonical": "Clubic", "aliases": ["clubique", "cloubic", "cloubique"], "note": "le média" },
+    { "canonical": "One UI", "aliases": ["oneui", "one u i", "wan u i", "wanne u i"], "note": "surcouche Samsung (les chiffres de version ne sont pas touchés)" },
     { "canonical": "iPhone", "aliases": ["i phone", "i-phone", "iphone", "aïe phone"] },
     { "canonical": "iOS", "aliases": ["i o s", "ios", "i.o.s"] },
     { "canonical": "iPad", "aliases": ["i pad", "ipad"] },

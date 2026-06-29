@@ -219,12 +219,13 @@ function onGenerate() {
 function correctionSummary(c) {
   if (!c) return "";
   var total = (c.items && c.items.length) || 0;
+  var warn = (c.warnings && c.warnings.length) ? "⚠ " + c.warnings.join(" ") + " " : "";
   if (c.error) {
     return "⚠ LLM indisponible (glossaire seul, " + total + " corr.) — " + c.error + ". ";
   }
   if (c.used_llm) {
     return total + " correction(s) dont " + c.n_corrections + " LLM (" +
-      (c.model || "?") + "). ";
+      (c.model || "?") + "). " + warn;
   }
   return total + " correction(s) glossaire (hors-ligne). ";
 }
