@@ -31,7 +31,7 @@ _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
 @dataclass
 class Correction:
-    """Une correction unitaire, pour affichage dans le panneau (lien « localiser »)."""
+    """Une correction unitaire APPLIQUÉE (glossaire), pour affichage."""
 
     original: str
     corrected: str        # "" = mot supprimé (parasite)
@@ -40,16 +40,27 @@ class Correction:
 
 
 @dataclass
+class Suggestion:
+    """Une proposition LLM NON appliquée, à valider par l'utilisateur."""
+
+    index: int            # position du mot dans la liste (après glossaire)
+    original: str
+    suggested: str        # "" = suppression proposée
+    start: float          # timecode (s) du mot — pour le lien « localiser »
+
+
+@dataclass
 class CorrectionResult:
     """Résultat de la passe de correction (pour remontée au panneau)."""
 
     words: list[Word]
-    used_llm: bool = False          # le LLM a bien été appelé et appliqué
+    used_llm: bool = False          # le LLM a bien été appelé
     model: str | None = None        # modèle utilisé si LLM
-    n_corrections: int = 0          # nb de mots modifiés par le LLM (hors glossaire)
+    n_corrections: int = 0          # nb de corrections LLM (appliquées OU suggérées)
     error: str | None = None        # raison du repli glossaire si le LLM a échoué
     warnings: list[str] = field(default_factory=list)
-    items: list[Correction] = field(default_factory=list)  # détail (glossaire + LLM)
+    items: list[Correction] = field(default_factory=list)        # appliquées
+    suggestions: list[Suggestion] = field(default_factory=list)  # à valider (mode suggest)
 
 SYSTEM_PROMPT = """\
 Tu es correcteur de transcriptions automatiques pour des médias high-tech \
@@ -162,12 +173,17 @@ def correct(
     media: str,
     *,
     offline: bool | None = None,
+    apply_llm: bool = True,
 ) -> CorrectionResult:
     """Corrige les mots. Renvoie un CorrectionResult (entrée non mutée).
 
-    Le LLM ne fait que de la correction timing-safe (1 mot ↔ 1 id). En cas
-    d'échec (réseau, JSON illisible…) on **dégrade gracieusement** vers le seul
-    résultat glossaire : on ne perd jamais la transcription pour un hoquet LLM.
+    Le glossaire (déterministe) est TOUJOURS appliqué. Le LLM ne fait que de la
+    correction timing-safe (1 mot ↔ 1 id) :
+    - apply_llm=True  : ses corrections sont appliquées (mode historique) ;
+    - apply_llm=False : elles sont renvoyées comme `suggestions` à valider, sans
+      modifier les mots (revue avant insertion).
+    En cas d'échec LLM (réseau, JSON illisible…) on **dégrade gracieusement** vers
+    le seul résultat glossaire : on ne perd jamais la transcription.
     """
     # 1. Pré-passe glossaire (déterministe, multi-mots, timing-safe), tracée.
     gloss_trace: list[dict] = []
@@ -181,17 +197,24 @@ def correct(
     if offline or not config.OPENROUTER_API_KEY:
         return CorrectionResult(words=glossed, used_llm=False, items=gloss_items)
 
-    # 2-3. Correction LLM par identifiant — protégée contre toute exception.
-    try:
-        user = _build_user_prompt(glossed, glossary, media)
-        raw = _call_openrouter(SYSTEM_PROMPT, user)
-        raw_corrections = _parse_corrections(raw, len(glossed))
-    except Exception as exc:  # réseau, HTTP, JSON, clé invalide…
+    # 2-3. Correction LLM par identifiant — protégée contre toute exception, avec
+    # un retry (OpenRouter renvoie parfois une réponse vide / un hoquet réseau).
+    user = _build_user_prompt(glossed, glossary, media)
+    raw_corrections: dict[int, str] | None = None
+    last_exc: Exception | None = None
+    for _attempt in range(2):
+        try:
+            raw = _call_openrouter(SYSTEM_PROMPT, user)
+            raw_corrections = _parse_corrections(raw, len(glossed))
+            break
+        except Exception as exc:  # réseau, HTTP, JSON vide, clé invalide…
+            last_exc = exc
+    if raw_corrections is None:
         return CorrectionResult(
             words=glossed,
             used_llm=False,
             model=config.OPENROUTER_MODEL,
-            error=f"{type(exc).__name__}: {exc}",
+            error=f"{type(last_exc).__name__}: {last_exc}",
             warnings=["Correction LLM indisponible : repli sur le glossaire."],
             items=gloss_items,
         )
@@ -216,13 +239,32 @@ def correct(
             f"interdite (numéros de version/modèle protégés)."
         )
 
+    changed = {
+        i: text for i, text in corrections.items() if text != glossed[i].text
+    }
+
+    if not apply_llm:
+        # Mode suggestion : on n'applique RIEN du LLM, on remonte des propositions.
+        suggestions = [
+            Suggestion(i, glossed[i].text, text, glossed[i].start)
+            for i, text in sorted(changed.items())
+        ]
+        return CorrectionResult(
+            words=glossed,
+            used_llm=True,
+            model=config.OPENROUTER_MODEL,
+            n_corrections=len(suggestions),
+            warnings=warnings,
+            items=gloss_items,
+            suggestions=suggestions,
+        )
+
     llm_items = [
         Correction(glossed[i].text, text, glossed[i].start, "llm")
-        for i, text in sorted(corrections.items())
-        if text != glossed[i].text
+        for i, text in sorted(changed.items())
     ]
     return CorrectionResult(
-        words=_apply_corrections(glossed, corrections),
+        words=_apply_corrections(glossed, changed),
         used_llm=True,
         model=config.OPENROUTER_MODEL,
         n_corrections=len(llm_items),

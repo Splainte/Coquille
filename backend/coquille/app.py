@@ -24,10 +24,14 @@ except ImportError as exc:  # pragma: no cover
         "FastAPI/pydantic requis pour le serveur : pip install -r requirements.txt"
     ) from exc
 
+from dataclasses import replace
+
 from . import config
 from .config import list_presets, load_preset
 from .pipeline import process
+from .segment import segment
 from .serialize import cue_to_dict, word_from_dict, word_to_dict
+from .srt import to_srt
 from .transcribe import (
     list_engines,
     load_premiere_transcript,
@@ -53,6 +57,16 @@ class ProcessRequest(BaseModel):
     premiere_transcript: Optional[dict[str, Any]] = None  # JSON brut Premiere
     offline: Optional[bool] = None
     max_chars_per_line: Optional[int] = None  # override piloté par le panneau
+    # "suggest" = corrections LLM proposées (non appliquées) ; "apply" = appliquées.
+    llm_mode: str = "suggest"
+
+
+class SegmentRequest(BaseModel):
+    """Re-segmentation de mots déjà corrigés (après validation des suggestions)."""
+
+    media: str
+    words: list[dict]
+    max_chars_per_line: Optional[int] = None
 
 
 class TranscribeRequest(BaseModel):
@@ -94,6 +108,7 @@ def post_process(req: ProcessRequest) -> dict:
             premiere_words=premiere_words,
             offline=req.offline,
             max_chars_per_line=mcpl,
+            apply_llm=(req.llm_mode != "suggest"),
         )
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -120,7 +135,45 @@ def post_process(req: ProcessRequest) -> dict:
                 }
                 for it in corr.items
             ],
+            "suggestions": [
+                {
+                    "index": s.index,
+                    "original": s.original,
+                    "suggested": s.suggested,
+                    "start": round(s.start, 3),
+                }
+                for s in corr.suggestions
+            ],
         } if corr else None,
+    }
+
+
+@app.post("/segment")
+def post_segment(req: SegmentRequest) -> dict:
+    """Re-segmente une liste de mots déjà corrigés → cues + SRT (pas de LLM).
+
+    Appelé par le panneau quand l'utilisateur applique/retire des suggestions :
+    les mots sont déjà à jour côté panneau, on ne refait QUE la segmentation."""
+    mcpl = req.max_chars_per_line
+    if mcpl is not None and not (10 <= mcpl <= 80):
+        raise HTTPException(
+            status_code=400, detail="max_chars_per_line doit être entre 10 et 80."
+        )
+    try:
+        preset = load_preset(req.media)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    rules = preset.segmentation
+    if mcpl:
+        rules = replace(rules, max_chars_per_line=mcpl)
+
+    words = [word_from_dict(w) for w in req.words]
+    cues = segment(words, rules)
+    return {
+        "track_style": preset.track_style,
+        "srt": to_srt(cues),
+        "cues": [cue_to_dict(c) for c in cues],
     }
 
 

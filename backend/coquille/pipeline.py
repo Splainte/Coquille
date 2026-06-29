@@ -39,6 +39,7 @@ def process(
     premiere_words: list[Word] | None = None,
     offline: bool | None = None,
     max_chars_per_line: int | None = None,
+    apply_llm: bool = True,
 ) -> PipelineResult:
     if not whisper_words and not premiere_words:
         raise ValueError("Fournir au moins whisper_words ou premiere_words.")
@@ -58,8 +59,8 @@ def process(
     else:
         words = list(whisper_words or premiere_words or [])
 
-    # 2. Correction (glossaire + LLM, avec repli gracieux).
-    correction = correct(words, glossary, media, offline=offline)
+    # 2. Correction (glossaire toujours appliqué ; LLM appliqué ou suggéré).
+    correction = correct(words, glossary, media, offline=offline, apply_llm=apply_llm)
     words = correction.words
 
     # 3. Segmentation / équilibrage des lignes.

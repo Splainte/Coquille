@@ -467,6 +467,31 @@ class TestCorrectLLM(unittest.TestCase):
         self.assertEqual([w.text for w in res.words], ["iPhone15"])
         self.assertFalse(res.warnings)
 
+    def test_suggest_mode_does_not_apply_llm(self):
+        words = [W("le", 0.0, 0.2), W("pixelle", 0.2, 0.4), W("amoled", 0.6, 0.3)]
+        raw = '{"words": [{"id": 1, "text": "Pixel"}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid", apply_llm=False)
+        # le LLM n'est PAS appliqué : "pixelle" reste tel quel dans les mots
+        self.assertEqual([w.text for w in res.words], ["le", "pixelle", "AMOLED"])
+        # mais il est proposé en suggestion, avec index + timecode
+        self.assertEqual(len(res.suggestions), 1)
+        sg = res.suggestions[0]
+        self.assertEqual(sg.index, 1)
+        self.assertEqual(sg.original, "pixelle")
+        self.assertEqual(sg.suggested, "Pixel")
+        self.assertAlmostEqual(sg.start, 0.2)
+        # le glossaire, lui, est bien appliqué (et listé dans items, pas suggestions)
+        self.assertTrue(any(it.corrected == "AMOLED" for it in res.items))
+
+    def test_suggest_mode_respects_digit_guard(self):
+        words = [W("S26", 0.0, 0.3)]
+        raw = '{"words": [{"id": 0, "text": "S25"}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid", apply_llm=False)
+        self.assertEqual(res.suggestions, [])   # chiffre protégé : pas même suggéré
+        self.assertTrue(res.warnings)
+
     def test_items_present_on_llm_failure(self):
         words = [W("a", 0.0, 0.2), W("moled", 0.2, 0.4)]
         boom = mock.Mock(side_effect=RuntimeError("ko"))

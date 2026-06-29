@@ -114,8 +114,14 @@ var backend = {
     return http("POST", "/transcribe", { audio_path: audioPath, language: "fr", engine: engine })
       .then(function (r) { return r.words; });
   },
-  process: function (payload) { return http("POST", "/process", payload); }
+  process: function (payload) { return http("POST", "/process", payload); },
+  // Re-segmentation de mots déjà corrigés (après validation des suggestions).
+  segment: function (payload) { return http("POST", "/segment", payload); }
 };
+
+// État de la revue en cours (suggestions LLM à valider avant insertion).
+// words = mots après glossaire (base) ; accepted = { index: textProposé }.
+var review = { media: null, maxChars: null, words: [], accepted: {} };
 
 // --- Initialisation ---------------------------------------------------------
 function init() {
@@ -197,12 +203,17 @@ function onGenerate() {
       setStatus("Alignement, correction et segmentation…");
       return backend.process({
         media: media, whisper_words: whisperWords, offline: offline,
-        max_chars_per_line: maxChars,
+        max_chars_per_line: maxChars, llm_mode: "suggest",
       });
     })
     .then(function (result) {
       setBusy(false);
-      lastResult = result;
+      lastResult = result;  // srt = version glossaire (aucune suggestion appliquée)
+      // Mémorise la base pour la revue : mots après glossaire + suggestions.
+      review = {
+        media: media, maxChars: maxChars,
+        words: result.words || [], accepted: {},
+      };
       renderCorrections(result.correction);
       renderCues(result.cues);
       setStatus(
@@ -215,19 +226,43 @@ function onGenerate() {
     .catch(function (e) { setBusy(false); setStatus("Erreur : " + e.message); });
 }
 
+// Applique au tableau de mots de base les suggestions cochées, puis re-segmente
+// côté backend et met à jour l'aperçu + le SRT à insérer.
+function applyReview() {
+  var words = review.words.map(function (w, i) {
+    if (Object.prototype.hasOwnProperty.call(review.accepted, i)) {
+      var copy = {}; for (var k in w) { copy[k] = w[k]; }
+      copy.text = review.accepted[i];
+      return copy;
+    }
+    return w;
+  }).filter(function (w) { return w.text !== ""; });  // suppressions acceptées
+
+  setStatus("Mise à jour des sous-titres…");
+  return backend.segment({
+    media: review.media, words: words, max_chars_per_line: review.maxChars,
+  }).then(function (r) {
+    if (lastResult) { lastResult.srt = r.srt; lastResult.track_style = r.track_style; }
+    renderCues(r.cues);
+    var n = Object.keys(review.accepted).length;
+    setStatus(r.cues.length + " sous-titres. " + n + " suggestion(s) appliquée(s).");
+  }).catch(function (e) { setStatus("Erreur de re-segmentation : " + e.message); });
+}
+
 // Résumé lisible de la passe de correction pour la barre de statut.
 function correctionSummary(c) {
   if (!c) return "";
-  var total = (c.items && c.items.length) || 0;
+  var gloss = (c.items && c.items.length) || 0;
+  var sugg = (c.suggestions && c.suggestions.length) || 0;
   var warn = (c.warnings && c.warnings.length) ? "⚠ " + c.warnings.join(" ") + " " : "";
   if (c.error) {
-    return "⚠ LLM indisponible (glossaire seul, " + total + " corr.) — " + c.error + ". ";
+    return "⚠ LLM indisponible (glossaire seul, " + gloss + " corr.) — " + c.error + ". ";
   }
   if (c.used_llm) {
-    return total + " correction(s) dont " + c.n_corrections + " LLM (" +
+    return gloss + " corr. glossaire, " + sugg + " suggestion(s) LLM à valider (" +
       (c.model || "?") + "). " + warn;
   }
-  return total + " correction(s) glossaire (hors-ligne). ";
+  return gloss + " correction(s) glossaire (hors-ligne). ";
 }
 
 // Timecode lisible (m:ss.s) pour le lien « localiser ».
@@ -243,34 +278,92 @@ function seekTo(seconds) {
   });
 }
 
-// Section repliable « Corrections (N) ». DOM construit à la main (textContent)
-// pour ne pas injecter de HTML issu du texte corrigé.
+// Un lien « localiser m:ss.s » qui déplace la tête de lecture.
+function locLink(start) {
+  var loc = document.createElement("span"); loc.className = "loc";
+  loc.textContent = "localiser " + fmtTc(start);
+  loc.addEventListener("click", function () { seekTo(start); });
+  return loc;
+}
+
+// Deux sections : corrections glossaire (appliquées, lecture seule) et
+// suggestions LLM (à valider via cases à cocher). DOM en textContent.
 function renderCorrections(corr) {
   var box = $("corrections");
   box.innerHTML = "";
-  if (!corr || !corr.items || !corr.items.length) return;
+  if (!corr) return;
+  renderGlossarySection(box, corr.items || []);
+  renderSuggestionSection(box, corr.suggestions || []);
+}
 
+function renderGlossarySection(box, items) {
+  if (!items.length) return;
   var det = document.createElement("details");
   det.className = "corr";
   var sum = document.createElement("summary");
-  sum.textContent = "Corrections (" + corr.items.length + ")";
+  sum.textContent = "Corrections glossaire (" + items.length + ") — appliquées";
   det.appendChild(sum);
-
-  corr.items.forEach(function (it) {
+  items.forEach(function (it) {
     var row = document.createElement("div"); row.className = "item";
     var o = document.createElement("span"); o.className = "orig"; o.textContent = it.original;
     var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
     var n = document.createElement("span"); n.className = "new";
     n.textContent = it.corrected === "" ? "(supprimé)" : it.corrected;
-    var s = document.createElement("span"); s.className = "src";
-    s.textContent = it.source === "llm" ? "LLM" : "gloss";
-    var loc = document.createElement("span"); loc.className = "loc";
-    loc.textContent = "localiser " + fmtTc(it.start);
-    loc.addEventListener("click", function () { seekTo(it.start); });
     row.appendChild(o); row.appendChild(a); row.appendChild(n);
-    row.appendChild(s); row.appendChild(loc);
+    row.appendChild(locLink(it.start));
     det.appendChild(row);
   });
+  box.appendChild(det);
+}
+
+function renderSuggestionSection(box, suggestions) {
+  if (!suggestions.length) return;
+  var det = document.createElement("details");
+  det.className = "corr"; det.open = true;
+  var sum = document.createElement("summary");
+  sum.textContent = "Suggestions LLM (" + suggestions.length + ") — à valider";
+  det.appendChild(sum);
+
+  // Barre d'actions groupées.
+  var bar = document.createElement("div"); bar.className = "item bulk";
+  var allBtn = document.createElement("button"); allBtn.textContent = "Tout appliquer";
+  var noneBtn = document.createElement("button"); noneBtn.textContent = "Tout ignorer";
+  bar.appendChild(allBtn); bar.appendChild(noneBtn);
+  det.appendChild(bar);
+
+  var boxes = [];
+  suggestions.forEach(function (sg) {
+    var row = document.createElement("div"); row.className = "item";
+    var cb = document.createElement("input"); cb.type = "checkbox";
+    cb.addEventListener("change", function () {
+      if (cb.checked) { review.accepted[sg.index] = sg.suggested; }
+      else { delete review.accepted[sg.index]; }
+      applyReview();
+    });
+    boxes.push(cb);
+    var o = document.createElement("span"); o.className = "orig"; o.textContent = sg.original;
+    var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
+    var n = document.createElement("span"); n.className = "new";
+    n.textContent = sg.suggested === "" ? "(supprimer)" : sg.suggested;
+    var lab = document.createElement("label"); lab.className = "sugg";
+    lab.appendChild(cb); lab.appendChild(o); lab.appendChild(a); lab.appendChild(n);
+    row.appendChild(lab);
+    row.appendChild(locLink(sg.start));
+    det.appendChild(row);
+  });
+
+  // Actions groupées : on coche/décoche tout, met à jour `accepted`, re-segmente once.
+  allBtn.addEventListener("click", function () {
+    suggestions.forEach(function (sg) { review.accepted[sg.index] = sg.suggested; });
+    boxes.forEach(function (cb) { cb.checked = true; });
+    applyReview();
+  });
+  noneBtn.addEventListener("click", function () {
+    review.accepted = {};
+    boxes.forEach(function (cb) { cb.checked = false; });
+    applyReview();
+  });
+
   box.appendChild(det);
 }
 
