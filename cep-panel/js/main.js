@@ -23,6 +23,8 @@ var AUDIO_PRESET_PATH =
 
 var $ = function (id) { return document.getElementById(id); };
 var setStatus = function (msg) { $("status").textContent = msg; };
+// Spinner d'attente : affiché pendant les phases longues (rendu, transcription).
+var setBusy = function (on) { $("spinner").classList.toggle("hidden", !on); };
 var lastResult = null;
 
 // --- Nettoyage des temporaires ----------------------------------------------
@@ -153,8 +155,6 @@ function init() {
 
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
-  $("diag").addEventListener("click", onDiagnostic);
-  $("testInsert").addEventListener("click", onTestInsert);
 }
 
 // --- Flux génération --------------------------------------------------------
@@ -173,13 +173,14 @@ function onGenerate() {
   }
 
   var tmpWav = "";
+  setBusy(true);
   setStatus("Rendu audio de la séquence…");
   // os.tmpdir via Node (CEP : --enable-nodejs)
   try {
     var os = require("os"); var pathmod = require("path");
     tmpWav = pathmod.join(os.tmpdir(), "coquille-" + Date.now() + ".wav");
   } catch (e) {
-    setStatus("Node indisponible : " + e.message); return;
+    setBusy(false); setStatus("Node indisponible : " + e.message); return;
   }
 
   evalScript("coquilleExportAudio(" + jsStr(tmpWav) + "," + jsStr(AUDIO_PRESET_PATH) + ",0)")
@@ -199,12 +200,13 @@ function onGenerate() {
       });
     })
     .then(function (result) {
+      setBusy(false);
       lastResult = result;
       renderCues(result.cues);
       setStatus(result.cues.length + " sous-titres générés. Track Style : " + result.track_style);
       $("insert").disabled = false;
     })
-    .catch(function (e) { setStatus("Erreur : " + e.message); });
+    .catch(function (e) { setBusy(false); setStatus("Erreur : " + e.message); });
 }
 
 function renderCues(cues) {
@@ -252,47 +254,6 @@ function insertSrt(srtText, styleName) {
 function onInsert() {
   if (!lastResult) return;
   insertSrt(lastResult.srt, lastResult.track_style);
-}
-
-// Insertion d'un SRT factice — valide createCaptionTrack sans backend ni Whisper.
-function onTestInsert() {
-  var srt = [
-    "1", "00:00:00,000 --> 00:00:02,500", "Coquille — test d'insertion", "",
-    "2", "00:00:02,500 --> 00:00:05,000", "Si ce texte apparaît dans la timeline,", "",
-    "3", "00:00:05,000 --> 00:00:07,500", "createCaptionTrack fonctionne. ✅", ""
-  ].join("\n");
-  insertSrt(srt, null);
-}
-
-// --- Diagnostic du spike ----------------------------------------------------
-function onDiagnostic() {
-  var out = $("diagOut");
-  out.innerHTML = "Sondage…";
-  var lines = [];
-  var line = function (label, ok, extra) {
-    lines.push('<div class="' + (ok ? "ok" : "ko") + '">' +
-      (ok ? "✓ " : "✗ ") + label + (extra ? " — " + extra : "") + "</div>");
-    out.innerHTML = lines.join("");
-  };
-
-  // 1. Backend
-  backend.getPresets()
-    .then(function (p) { line("Backend :8765", true, p.length + " presets"); })
-    .catch(function (e) { line("Backend :8765", false, e.message); })
-    // 2. Sonde ExtendScript
-    .then(function () { return evalScript("coquilleProbe()"); })
-    .then(function (res) {
-      var caps = JSON.parse(res.slice(3)); // retire "OK:"
-      line("Projet ouvert", caps.hasProject);
-      line("Séquence active", caps.hasActiveSequence);
-      line("importFiles", caps.hasImportFiles);
-      line("createCaptionTrack (insertion)", caps.hasCreateCaptionTrack);
-      line("exportAsMediaDirect (audio)", caps.hasExportAsMediaDirect);
-      line("Premiere " + caps.appVersion, true);
-      line("AUDIO_PRESET_PATH configuré", !!AUDIO_PRESET_PATH,
-        AUDIO_PRESET_PATH || "à renseigner dans js/main.js");
-    })
-    .catch(function (e) { line("Sonde ExtendScript", false, e.message); });
 }
 
 init();
