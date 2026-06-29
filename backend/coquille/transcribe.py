@@ -12,9 +12,37 @@ de fournir un transcript Premiere seul si besoin.
 
 from __future__ import annotations
 
+import glob
+import os
 from typing import Any
 
 from .models import Word
+
+_cuda_dll_ready = False
+
+
+def _ensure_cuda_dll_path() -> None:
+    """Sur Windows, rend trouvables les DLL CUDA des paquets pip ``nvidia-*-cu12``.
+
+    CTranslate2 charge ``cublas64_12.dll`` / cuDNN au runtime. Contrairement à
+    Linux, Windows ne cherche pas dans ``site-packages`` → on enregistre les
+    dossiers ``bin`` des paquets nvidia via ``os.add_dll_directory``. No-op hors
+    Windows ou si les paquets ne sont pas installés (on retombe alors sur CPU).
+    """
+    global _cuda_dll_ready
+    if _cuda_dll_ready or os.name != "nt":
+        return
+    _cuda_dll_ready = True
+    try:
+        import nvidia  # namespace des paquets nvidia-*-cu12
+    except Exception:
+        return
+    for base in list(getattr(nvidia, "__path__", [])):
+        for bindir in glob.glob(os.path.join(base, "*", "bin")):
+            try:
+                os.add_dll_directory(bindir)
+            except Exception:  # pragma: no cover - dépend de l'environnement
+                pass
 
 
 def _f(d: dict, *keys: str, default: float | None = 0.0) -> float | None:
@@ -87,6 +115,7 @@ ENGINES: dict[str, dict[str, str]] = {
 def _has_cuda() -> bool:
     """Vrai si un GPU CUDA est exploitable (via CTranslate2, sans exiger torch)."""
     try:
+        _ensure_cuda_dll_path()
         import ctranslate2  # type: ignore
 
         return ctranslate2.get_cuda_device_count() > 0
@@ -145,6 +174,7 @@ def _fw_segments_to_words(segments) -> list[Word]:
 def _faster_whisper_transcribe(
     audio_path: str, model_name: str, language: str, initial_prompt: str | None
 ) -> list[Word]:
+    _ensure_cuda_dll_path()
     try:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as exc:

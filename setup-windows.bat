@@ -60,6 +60,8 @@ pushd "%ROOT%backend"
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip >nul
 pip install -r requirements.txt
+echo   Libs CUDA 12 (cuBLAS/cuDNN) pour le GPU...
+pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 popd
 
 echo.
