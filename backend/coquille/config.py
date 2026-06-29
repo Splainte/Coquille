@@ -80,18 +80,28 @@ def _load_dotenv(path: Path | None = None) -> None:
     path = path or (ROOT / ".env")
     if not path.exists():
         return
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    # Lecture tolérante à l'encodage : un .env sauvé en ANSI/cp1252 par Notepad
+    # (accents dans les commentaires) ne doit JAMAIS faire planter le backend.
+    # Les clés/valeurs utiles sont en ASCII ; on ignore les octets non décodables.
+    try:
+        text = path.read_text(encoding="utf-8-sig", errors="ignore")
+    except OSError:
+        return
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key = key.strip()
+        key = key.strip().lstrip("﻿")  # retire un éventuel BOM résiduel
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
 
 
-_load_dotenv()
+try:
+    _load_dotenv()
+except Exception:  # un .env malformé ne doit jamais empêcher le démarrage
+    pass
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.6")
