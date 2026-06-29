@@ -37,12 +37,21 @@ def _ensure_cuda_dll_path() -> None:
         import nvidia  # namespace des paquets nvidia-*-cu12
     except Exception:
         return
+    bindirs: list[str] = []
     for base in list(getattr(nvidia, "__path__", [])):
-        for bindir in glob.glob(os.path.join(base, "*", "bin")):
-            try:
-                os.add_dll_directory(bindir)
-            except Exception:  # pragma: no cover - dépend de l'environnement
-                pass
+        bindirs.extend(glob.glob(os.path.join(base, "*", "bin")))
+    for bindir in bindirs:
+        try:
+            os.add_dll_directory(bindir)
+        except Exception:  # pragma: no cover - dépend de l'environnement
+            pass
+    # Filet de sécurité : add_dll_directory ne couvre pas toutes les façons dont
+    # ctranslate2 charge cuBLAS et résout ses dépendances (cublas -> cudart).
+    # Le PATH du process, lui, est toujours consulté par le loader Windows.
+    if bindirs:
+        os.environ["PATH"] = os.pathsep.join(
+            bindirs + [os.environ.get("PATH", "")]
+        )
 
 
 def _f(d: dict, *keys: str, default: float | None = 0.0) -> float | None:
