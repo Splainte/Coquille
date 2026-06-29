@@ -231,11 +231,20 @@ function insertSrt(srtText, styleName) {
   } catch (e) { setStatus("Écriture SRT impossible : " + e.message); return; }
 
   setStatus("Insertion de la piste de sous-titres…");
+  var styleMsg = styleName ? " Appliquez le Track Style « " + styleName + " »." : "";
   evalScript("coquilleInsertCaptions(" + jsStr(srtPath) + ",0)")
-    .then(function () {
-      rmFile(srtPath);  // clip retiré du chutier côté hôte → fichier inutile
-      setStatus("Piste insérée." +
-        (styleName ? " Appliquez le Track Style « " + styleName + " »." : ""));
+    .then(function (res) {
+      // "OK:1" = clip retiré du chutier → on peut supprimer le fichier.
+      // "OK:0:<raison>" = clip resté → on garde le fichier (sinon média hors-ligne).
+      var cleaned = typeof res === "string" && res.indexOf("OK:1") === 0;
+      if (cleaned) {
+        rmFile(srtPath);
+        setStatus("Piste insérée." + styleMsg);
+      } else {
+        var reason = typeof res === "string" ? res.replace(/^OK:0:?/, "") : "";
+        setStatus("Piste insérée (clip SRT laissé dans le chutier" +
+          (reason ? " : " + reason : "") + ", fichier conservé)." + styleMsg);
+      }
     })
     .catch(function (e) { setStatus("Erreur d'insertion : " + e.message); });
 }

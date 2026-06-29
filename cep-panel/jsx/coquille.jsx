@@ -36,17 +36,26 @@ function coquilleInsertCaptions(srtPath, startAtTimeSeconds) {
   var seq = app.project.activeSequence;
   if (!seq) { return "ERREUR: aucune séquence active"; }
 
+  var root = app.project.rootItem;
   var ok = app.project.importFiles(
     [srtPath],
     /* suppressUI */ true,
-    app.project.rootItem,
+    root,
     /* importAsNumberedStills */ false
   );
   if (!ok) { return "ERREUR: import du SRT échoué"; }
 
-  // Le projectItem importé = le dernier ajouté à la racine.
-  var root = app.project.rootItem;
-  var captionItem = root.children[root.children.numItems - 1];
+  // Retrouver le projectItem importé par son chemin média (plus fiable que
+  // « le dernier enfant » : l'ordre du chutier n'est pas garanti).
+  var wanted = String(srtPath).replace(/\\/g, "/");
+  var captionItem = null;
+  for (var i = root.children.numItems - 1; i >= 0; i--) {
+    var it = root.children[i];
+    var mp = "";
+    try { mp = it.getMediaPath(); } catch (e) {}
+    if (mp && mp.replace(/\\/g, "/") === wanted) { captionItem = it; break; }
+  }
+  if (!captionItem) { captionItem = root.children[root.children.numItems - 1]; }
 
   var startTicks = startAtTimeSeconds || 0; // selon version : secondes ou ticks
   var created;
@@ -58,9 +67,18 @@ function coquilleInsertCaptions(srtPath, startAtTimeSeconds) {
   if (!created) { return "ERREUR: createCaptionTrack a renvoyé false"; }
 
   // La piste caption est autonome une fois créée : on retire le clip importé du
-  // chutier pour ne pas le polluer (vérifié : sans effet sur les sous-titres).
-  try { captionItem.deleteClip(); } catch (e) { /* non bloquant */ }
-  return "OK";
+  // chutier. On rapporte le résultat ("OK:1" retiré, "OK:0:<raison>" sinon) pour
+  // que le panneau ne supprime le fichier que si le clip a bien quitté le chutier
+  // (sinon : média hors-ligne).
+  if (typeof captionItem.deleteClip !== "function") {
+    return "OK:0:deleteClip indisponible";
+  }
+  try {
+    captionItem.deleteClip();
+  } catch (e) {
+    return "OK:0:" + e.toString();
+  }
+  return "OK:1";
 }
 
 // --- 3. Sonde de capacités (diagnostic du spike) ----------------------------
