@@ -67,14 +67,16 @@ function coquilleInsertCaptions(srtPath, startAtTimeSeconds) {
   if (!created) { return "ERREUR: createCaptionTrack a renvoyé false"; }
 
   // La piste caption est autonome une fois créée : on retire le clip importé du
-  // chutier. On rapporte le résultat ("OK:1" retiré, "OK:0:<raison>" sinon) pour
-  // que le panneau ne supprime le fichier que si le clip a bien quitté le chutier
-  // (sinon : média hors-ligne).
-  if (typeof captionItem.deleteClip !== "function") {
-    return "OK:0:deleteClip indisponible";
-  }
+  // chutier. L'API ne permet PAS de supprimer un projectItem directement
+  // (deleteClip n'existe pas), mais deleteBin() supprime un bin ET son contenu.
+  // Contournement : bin tampon → y déplacer le clip → supprimer le bin.
+  // On rapporte le résultat ("OK:1" retiré, "OK:0:<raison>" sinon) pour que le
+  // panneau ne supprime le fichier que si le clip a bien quitté le chutier.
   try {
-    captionItem.deleteClip();
+    var trash = root.createBin("__coquille_tmp__");
+    if (!trash) { return "OK:0:createBin a échoué"; }
+    captionItem.moveBin(trash);
+    trash.deleteBin();
   } catch (e) {
     return "OK:0:" + e.toString();
   }
