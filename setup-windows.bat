@@ -60,8 +60,8 @@ pushd "%ROOT%backend"
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip >nul
 pip install -r requirements.txt
-echo   Libs CUDA 12 (cuBLAS/cuDNN) pour le GPU...
-pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+echo   Libs CUDA 12 (cuBLAS/cuDNN/runtime) pour le GPU...
+pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
 popd
 
 echo.
@@ -73,6 +73,6 @@ echo  3^) Redemarre Premiere : Fenetre ^> Extensions ^> Coquille
 echo.
 echo  Si erreur CUDA au 1er rendu (4070/4090^), installe les libs GPU :
 echo     backend\.venv\Scripts\activate.bat
-echo     pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+echo     pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
 echo ============================================
 pause
