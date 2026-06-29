@@ -15,13 +15,30 @@ Hors-ligne (pas de clé, ou COQUILLE_CORRECT_OFFLINE=1), on s'arrête après l'�
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+import re
+from dataclasses import dataclass, field, replace
 
 from . import config
 from .glossary import Glossary
 from .models import Word
 
 LOW_CONFIDENCE = 0.5  # seuil en dessous duquel un mot est signalé au LLM
+
+# Le LLM emballe parfois le JSON dans un bloc Markdown ```json … ``` malgré la
+# consigne : on le retire avant parsing.
+_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
+
+
+@dataclass
+class CorrectionResult:
+    """Résultat de la passe de correction (pour remontée au panneau)."""
+
+    words: list[Word]
+    used_llm: bool = False          # le LLM a bien été appelé et appliqué
+    model: str | None = None        # modèle utilisé si LLM
+    n_corrections: int = 0          # nb de mots modifiés par le LLM (hors glossaire)
+    error: str | None = None        # raison du repli glossaire si le LLM a échoué
+    warnings: list[str] = field(default_factory=list)
 
 SYSTEM_PROMPT = """\
 Tu es correcteur de transcriptions pour des médias high-tech francophones \
@@ -100,6 +117,7 @@ def _call_openrouter(system: str, user: str) -> str:
 
 
 def _parse_corrections(raw: str, n_words: int) -> dict[int, str]:
+    raw = _FENCE.sub("", raw.strip())
     data = json.loads(raw)
     corrections: dict[int, str] = {}
     for item in data.get("words", []):
@@ -112,23 +130,52 @@ def _parse_corrections(raw: str, n_words: int) -> dict[int, str]:
     return corrections
 
 
+def _count_real_corrections(words: list[Word], corrections: dict[int, str]) -> int:
+    """Nombre de corrections qui changent réellement un mot (≠ texte d'origine)."""
+    return sum(
+        1 for i, text in corrections.items()
+        if 0 <= i < len(words) and text != words[i].text
+    )
+
+
 def correct(
     words: list[Word],
     glossary: Glossary,
     media: str,
     *,
     offline: bool | None = None,
-) -> list[Word]:
-    """Corrige les mots. Renvoie une nouvelle liste (entrée non mutée)."""
+) -> CorrectionResult:
+    """Corrige les mots. Renvoie un CorrectionResult (entrée non mutée).
+
+    Le LLM ne fait que de la correction timing-safe (1 mot ↔ 1 id). En cas
+    d'échec (réseau, JSON illisible…) on **dégrade gracieusement** vers le seul
+    résultat glossaire : on ne perd jamais la transcription pour un hoquet LLM.
+    """
     # 1. Pré-passe glossaire (déterministe, multi-mots, timing-safe).
-    words = glossary.apply_words([replace(w) for w in words])
+    glossed = glossary.apply_words([replace(w) for w in words])
 
     offline = config.CORRECT_OFFLINE if offline is None else offline
     if offline or not config.OPENROUTER_API_KEY:
-        return words
+        return CorrectionResult(words=glossed, used_llm=False)
 
-    # 2-3. Correction LLM par identifiant.
-    user = _build_user_prompt(words, glossary, media)
-    raw = _call_openrouter(SYSTEM_PROMPT, user)
-    corrections = _parse_corrections(raw, len(words))
-    return _apply_corrections(words, corrections)
+    # 2-3. Correction LLM par identifiant — protégée contre toute exception.
+    try:
+        user = _build_user_prompt(glossed, glossary, media)
+        raw = _call_openrouter(SYSTEM_PROMPT, user)
+        corrections = _parse_corrections(raw, len(glossed))
+    except Exception as exc:  # réseau, HTTP, JSON, clé invalide…
+        return CorrectionResult(
+            words=glossed,
+            used_llm=False,
+            model=config.OPENROUTER_MODEL,
+            error=f"{type(exc).__name__}: {exc}",
+            warnings=["Correction LLM indisponible : repli sur le glossaire."],
+        )
+
+    n = _count_real_corrections(glossed, corrections)
+    return CorrectionResult(
+        words=_apply_corrections(glossed, corrections),
+        used_llm=True,
+        model=config.OPENROUTER_MODEL,
+        n_corrections=n,
+    )

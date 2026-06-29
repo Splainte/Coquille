@@ -68,6 +68,31 @@ def list_presets(presets_dir: Path | None = None) -> list[str]:
 
 # --- Paramètres globaux (depuis l'environnement) ---
 
+
+def _load_dotenv(path: Path | None = None) -> None:
+    """Charge un fichier ``backend/.env`` (KEY=VALUE) dans os.environ.
+
+    Loader minimal, sans dépendance : lignes ``KEY=VALUE``, ``#`` en commentaire,
+    guillemets optionnels autour de la valeur. Une variable déjà définie dans
+    l'environnement réel n'est PAS écrasée (l'env explicite gagne). Fichier
+    NON versionné (cf. .gitignore) — c'est là que vit la clé OpenRouter.
+    """
+    path = path or (ROOT / ".env")
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
+
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.6")
 OPENROUTER_BASE_URL = os.environ.get(

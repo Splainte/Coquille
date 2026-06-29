@@ -203,10 +203,26 @@ function onGenerate() {
       setBusy(false);
       lastResult = result;
       renderCues(result.cues);
-      setStatus(result.cues.length + " sous-titres générés. Track Style : " + result.track_style);
+      setStatus(
+        result.cues.length + " sous-titres générés. " +
+        correctionSummary(result.correction) +
+        "Track Style : " + result.track_style
+      );
       $("insert").disabled = false;
     })
     .catch(function (e) { setBusy(false); setStatus("Erreur : " + e.message); });
+}
+
+// Résumé lisible de la passe de correction pour la barre de statut.
+function correctionSummary(c) {
+  if (!c) return "";
+  if (c.error) {
+    return "⚠ LLM indisponible (glossaire seul) — " + c.error + ". ";
+  }
+  if (c.used_llm) {
+    return c.n_corrections + " correction(s) LLM (" + (c.model || "?") + "). ";
+  }
+  return "Glossaire seul (mode hors-ligne). ";
 }
 
 function renderCues(cues) {

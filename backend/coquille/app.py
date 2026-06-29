@@ -98,12 +98,20 @@ def post_process(req: ProcessRequest) -> dict:
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    corr = result.correction
     return {
         "media": result.media,
         "track_style": load_preset(result.media).track_style,
         "srt": result.srt,
         "cues": [cue_to_dict(c) for c in result.cues],
         "words": [word_to_dict(w) for w in result.words],
+        "correction": {
+            "used_llm": corr.used_llm,
+            "model": corr.model,
+            "n_corrections": corr.n_corrections,
+            "error": corr.error,
+            "warnings": corr.warnings,
+        } if corr else None,
     }
 
 

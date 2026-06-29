@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 
 from .align import align
 from .config import load_preset
-from .correct import correct
+from .correct import CorrectionResult, correct
 from .glossary import load_glossary
 from .models import Cue, Word
 from .segment import segment
@@ -23,6 +23,7 @@ class PipelineResult:
     words: list[Word]   # mots corrigés et horodatés (avant segmentation)
     cues: list[Cue]
     srt: str
+    correction: CorrectionResult | None = None  # détail de la passe de correction
 
     @property
     def track_style(self) -> str:
@@ -57,8 +58,9 @@ def process(
     else:
         words = list(whisper_words or premiere_words or [])
 
-    # 2. Correction (glossaire + LLM).
-    words = correct(words, glossary, media, offline=offline)
+    # 2. Correction (glossaire + LLM, avec repli gracieux).
+    correction = correct(words, glossary, media, offline=offline)
+    words = correction.words
 
     # 3. Segmentation / équilibrage des lignes.
     cues = segment(words, rules)
@@ -66,4 +68,6 @@ def process(
     # 4. Export SRT.
     srt_text = to_srt(cues)
 
-    return PipelineResult(media=media, words=words, cues=cues, srt=srt_text)
+    return PipelineResult(
+        media=media, words=words, cues=cues, srt=srt_text, correction=correction
+    )

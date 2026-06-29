@@ -6,9 +6,12 @@ Lancer depuis backend/ :  python -m unittest discover -s tests -v
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from coquille import config, correct as correct_mod
+from coquille.correct import CorrectionResult, _parse_corrections, correct
 from coquille.align import align
 from coquille.config import SegmentationRules, load_preset, list_presets
 from coquille.glossary import load_glossary, Glossary, Term
@@ -329,6 +332,69 @@ class TestTranscriptionLayer(unittest.TestCase):
         out = _voxtral_json_to_words(nested)
         self.assertEqual(out[0].text, "Salut")
         self.assertAlmostEqual(out[0].duration, 0.4)
+
+
+class TestCorrectLLM(unittest.TestCase):
+    """Passe de correction LLM (appel réseau mocké)."""
+
+    def setUp(self):
+        self.g = Glossary(terms=[Term("AMOLED", ["a moled", "amoled"])])
+        # Active le chemin LLM : clé présente, hors-ligne désactivé.
+        self._prev_key = config.OPENROUTER_API_KEY
+        self._prev_off = config.CORRECT_OFFLINE
+        config.OPENROUTER_API_KEY = "test-key"
+        config.CORRECT_OFFLINE = False
+
+    def tearDown(self):
+        config.OPENROUTER_API_KEY = self._prev_key
+        config.CORRECT_OFFLINE = self._prev_off
+
+    def test_parse_corrections_strips_markdown_fence(self):
+        raw = '```json\n{"words": [{"id": 0, "text": "Pixel"}]}\n```'
+        self.assertEqual(_parse_corrections(raw, 3), {0: "Pixel"})
+
+    def test_parse_corrections_ignores_out_of_range_ids(self):
+        raw = '{"words": [{"id": 9, "text": "x"}, {"id": 1, "text": "ok"}]}'
+        self.assertEqual(_parse_corrections(raw, 3), {1: "ok"})
+
+    def test_llm_applies_corrections_by_id(self):
+        words = [W("le", 0.0, 0.2), W("pixelle", 0.2, 0.4), W("écran", 0.6, 0.5)]
+        raw = '{"words": [{"id": 1, "text": "Pixel"}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid")
+        self.assertIsInstance(res, CorrectionResult)
+        self.assertTrue(res.used_llm)
+        self.assertEqual([w.text for w in res.words], ["le", "Pixel", "écran"])
+        self.assertEqual(res.n_corrections, 1)
+        # le timecode du mot corrigé est préservé (timing-safe)
+        self.assertAlmostEqual(res.words[1].start, 0.2)
+
+    def test_llm_count_ignores_noop_corrections(self):
+        words = [W("Pixel", 0.0, 0.2), W("écran", 0.2, 0.4)]
+        # le LLM renvoie un mot identique : ne doit pas compter comme correction
+        raw = '{"words": [{"id": 0, "text": "Pixel"}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid")
+        self.assertEqual(res.n_corrections, 0)
+
+    def test_llm_failure_falls_back_to_glossary(self):
+        words = [W("a", 0.0, 0.2), W("moled", 0.2, 0.4)]
+        boom = mock.Mock(side_effect=RuntimeError("réseau coupé"))
+        with mock.patch.object(correct_mod, "_call_openrouter", boom):
+            res = correct(words, self.g, "frandroid")
+        self.assertFalse(res.used_llm)
+        self.assertIsNotNone(res.error)
+        self.assertTrue(res.warnings)
+        # le repli glossaire a quand même corrigé "a moled" -> "AMOLED"
+        self.assertEqual([w.text for w in res.words], ["AMOLED"])
+
+    def test_offline_skips_llm(self):
+        words = [W("amoled", 0.0, 0.3)]
+        with mock.patch.object(correct_mod, "_call_openrouter") as called:
+            res = correct(words, self.g, "frandroid", offline=True)
+        called.assert_not_called()
+        self.assertFalse(res.used_llm)
+        self.assertEqual([w.text for w in res.words], ["AMOLED"])
 
 
 class TestPipelineEndToEnd(unittest.TestCase):
