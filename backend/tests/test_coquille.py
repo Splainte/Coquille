@@ -68,6 +68,16 @@ class TestGlossary(unittest.TestCase):
         self.g.apply_words(words, trace=trace)
         self.assertEqual(trace, [])
 
+    def test_apply_words_preserves_attached_punctuation(self):
+        # un terme suivi d'une ponctuation garde sa virgule / son point final
+        words = [W("iphone,", 0.0, 0.3), W("wifi.", 0.3, 0.3)]
+        trace = []
+        out = self.g.apply_words(words, trace=trace)
+        self.assertEqual([w.text for w in out], ["iPhone,", "Wi-Fi."])
+        # casse déjà correcte + ponctuation conservée : "Samsung," n'est pas un faux positif
+        only_casing = self.g.apply_words([W("Wi-Fi.", 0.0, 0.3)], trace=(t2 := []))
+        self.assertEqual(t2, [])  # rien à corriger, donc rien dans la liste
+
     def test_real_glossaries_load(self):
         for media in ("frandroid", "numerama", "clubic"):
             g = load_glossary(media)

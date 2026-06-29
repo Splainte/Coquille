@@ -106,17 +106,22 @@ class Glossary:
                 if window == list(toks):
                     first, last = words[i], words[i + n - 1]
                     confs = [w.confidence for w in words[i : i + n] if w.confidence is not None]
+                    # Préserve la ponctuation accolée (virgule, point de fin de
+                    # phrase, parenthèse…) : on ne remplace que le « cœur » du mot.
+                    prefix = re.match(r"^\W*", first.text).group(0)
+                    suffix = re.search(r"\W*$", last.text).group(0)
+                    new_text = prefix + canonical + suffix
                     if trace is not None:
                         original = " ".join(words[i + k].text for k in range(n))
-                        if original != canonical:
+                        if original != new_text:
                             trace.append({
                                 "original": original,
-                                "corrected": canonical,
+                                "corrected": new_text,
                                 "start": first.start,
                             })
                     out.append(
                         Word(
-                            text=canonical,
+                            text=new_text,
                             start=first.start,
                             duration=last.end - first.start,
                             confidence=min(confs) if confs else None,
