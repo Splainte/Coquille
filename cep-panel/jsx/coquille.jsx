@@ -55,7 +55,12 @@ function coquilleInsertCaptions(srtPath, startAtTimeSeconds) {
   } catch (e) {
     return "ERREUR: createCaptionTrack: " + e.toString();
   }
-  return created ? "OK" : "ERREUR: createCaptionTrack a renvoyé false";
+  if (!created) { return "ERREUR: createCaptionTrack a renvoyé false"; }
+
+  // La piste caption est autonome une fois créée : on retire le clip importé du
+  // chutier pour ne pas le polluer (vérifié : sans effet sur les sous-titres).
+  try { captionItem.deleteClip(); } catch (e) { /* non bloquant */ }
+  return "OK";
 }
 
 // --- 3. Sonde de capacités (diagnostic du spike) ----------------------------

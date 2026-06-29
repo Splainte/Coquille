@@ -233,6 +233,7 @@ function insertSrt(srtText, styleName) {
   setStatus("Insertion de la piste de sous-titres…");
   evalScript("coquilleInsertCaptions(" + jsStr(srtPath) + ",0)")
     .then(function () {
+      rmFile(srtPath);  // clip retiré du chutier côté hôte → fichier inutile
       setStatus("Piste insérée." +
         (styleName ? " Appliquez le Track Style « " + styleName + " »." : ""));
     })
