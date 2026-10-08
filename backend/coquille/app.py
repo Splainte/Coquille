@@ -40,7 +40,7 @@ from .transcribe import (
     transcribe_audio,
 )
 
-app = FastAPI(title="Coquille", version="0.1.0")
+app = FastAPI(title="Coquille", version="0.2.0")
 
 # Le panneau CEP s'exécute dans CEF depuis une origine "file://" (= "null").
 # Outil local uniquement (127.0.0.1) → on autorise toutes les origines.
