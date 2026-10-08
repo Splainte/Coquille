@@ -14,6 +14,7 @@ Transforme une liste de mots horodatés en cues (sous-titres) en respectant :
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from .config import SegmentationRules
 from .models import Cue, Word
@@ -52,6 +53,19 @@ _DANGLING = {
 }
 
 
+# Unités qu'on ne sépare jamais du nombre qui les précède (« 370 » | « kW »).
+_UNITS = {
+    "km", "kilomètres", "kilomètre", "m", "mètres", "mètre", "cm", "mm", "nm",
+    "nanomètres", "kg", "g", "grammes", "tonnes", "kw", "kwh", "w", "watts", "v",
+    "volts", "ch", "chevaux", "cv", "€", "euros", "euro", "dollars", "$", "minutes",
+    "minute", "min", "secondes", "seconde", "s", "heures", "heure", "h", "jours",
+    "ans", "mois", "pouces", "pouce", "go", "to", "mo", "gb", "tb", "mbps", "gbps",
+    "hz", "ghz", "mhz", "mah", "ah", "litres", "litre", "l", "fps", "mpx",
+    "mégapixels", "km/h", "mph", "°c", "degrés", "fois", "%",
+}
+_ENDS_WITH_DIGIT = re.compile(r"\d$")
+
+
 def _can_break_before(words: list[Word], k: int) -> bool:
     """Vrai si on peut couper (ligne ou cue) juste avant words[k] sans casser un
     collage. On ne coupe jamais entre deux tokens collés (high / -tech, n' / allez)
@@ -62,7 +76,34 @@ def _can_break_before(words: list[Word], k: int) -> bool:
         return False
     if words[k - 1].text.endswith(_NO_SPACE_AFTER):
         return False
+    if (_ENDS_WITH_DIGIT.search(words[k - 1].text)
+            and words[k].text.lower().rstrip(".,;:!?…") in _UNITS):
+        return False  # nombre + unité indissociables
     return True
+
+
+def merge_glued(words: list[Word]) -> list[Word]:
+    """Recolle les morceaux d'un même mot que la transcription sépare
+    (« l » + « 'était », « haut » + « -parleur », « mot » + « , »).
+
+    Whisper découpe ainsi les élisions : le LLM voit alors deux identifiants
+    pour un seul mot et les « corrige » de travers (« 'était »→« était »). Le
+    timing du mot recollé couvre les deux morceaux ; confiance = la plus basse."""
+    out: list[Word] = []
+    for w in words:
+        if out and (_NO_SPACE_BEFORE.match(w.text) or out[-1].text.endswith(_NO_SPACE_AFTER)):
+            prev = out[-1]
+            confs = [c for c in (prev.confidence, w.confidence) if c is not None]
+            out[-1] = replace(
+                prev,
+                text=prev.text + w.text,
+                duration=max(prev.end, w.end) - prev.start,
+                confidence=min(confs) if confs else None,
+                is_eos=prev.is_eos or w.is_eos,
+            )
+        else:
+            out.append(w)
+    return out
 
 
 def render(words: list[Word]) -> str:
@@ -82,15 +123,22 @@ def render(words: list[Word]) -> str:
 def _wrap_greedy(words: list[Word], max_line: int) -> list[str]:
     """Emballage glouton : remplit chaque ligne jusqu'à `max_line` caractères.
     Garantit des lignes <= max_line (sauf mot isolé plus long que max_line)."""
+    # On emballe des BLOCS insécables (tokens collés : « l » + « 'adorer. »), sinon
+    # le morceau collé s'ajoute à la ligne courante même s'il la fait déborder.
+    blocks: list[list[Word]] = []
+    for i, w in enumerate(words):
+        if blocks and not _can_break_before(words, i):
+            blocks[-1].append(w)
+        else:
+            blocks.append([w])
     lines: list[str] = []
     line: list[Word] = []
-    for i, w in enumerate(words):
-        breakable = _can_break_before(words, i)
-        if line and breakable and len(render(line + [w])) > max_line:
+    for block in blocks:
+        if line and len(render(line + block)) > max_line:
             lines.append(render(line))
-            line = [w]
+            line = list(block)
         else:
-            line.append(w)
+            line.extend(block)
     if line:
         lines.append(render(line))
     return lines
@@ -98,12 +146,6 @@ def _wrap_greedy(words: list[Word], max_line: int) -> list[str]:
 
 _SENTENCE_END = (".", "!", "?", "…")
 _CLAUSE_PUNCT = (".", "!", "?", "…", ",", ";", ":")
-
-# Un cue plus court que ça (en caractères) et isolé est un « orphelin » : un
-# fragment de phrase laissé seul par une micro-pause. On le recolle au voisin
-# de la même phrase quand c'est possible (cf. _reflow_orphans).
-_ORPHAN_CHARS = 14
-
 
 def _ends_sentence(w: Word) -> bool:
     """Vrai si ce mot termine une phrase (marqueur eos ou ponctuation forte)."""
@@ -119,141 +161,133 @@ def _fits(words: list[Word], rules: SegmentationRules) -> bool:
     return len(_wrap_greedy(words, rules.max_chars_per_line)) <= rules.max_lines
 
 
-def _best_cut_index(words: list[Word], k: int) -> int:
-    """Meilleur point de coupure dans words[:k+...] : on privilégie la dernière
-    frontière de proposition (ponctuation), sinon on évite de finir sur un
-    mot-outil. Renvoie un index de coupure entre 1 et k."""
-    for j in range(k, 0, -1):
-        if _can_break_before(words, j) and words[j - 1].text.rstrip().endswith(_CLAUSE_PUNCT):
-            # On n'accepte la coupe ponctuation que si le 1er cue n'est pas
-            # orphelin : sinon une virgule précoce (« Et oui, ») gaspillerait
-            # tout le cue. Dans ce cas on coupe plutôt au plus près de k.
-            if len(render(words[:j])) > _ORPHAN_CHARS:
-                return j
-            break
-    j = k
-    while j > 1 and (
-        not _can_break_before(words, j)
-        or words[j - 1].text.lower().strip("'’") in _DANGLING
-    ):
-        j -= 1
-    return j
+# --- Découpage en cues : programmation dynamique ---------------------------
+# Chaque façon de couper la suite de mots en cues reçoit un coût ; on retient
+# la moins chère (optimum global, comme la césure de paragraphes de TeX). Un
+# remplissage glouton, lui, fait des cues pleins puis laisse des queues de
+# phrase isolées (« de la batterie. » 0,4 s à l'écran).
+_CUE_COST = 1.0            # coût fixe par cue : évite de fragmenter sans raison
+_CROSS_SENTENCE = 10.0     # garder deux phrases dans un même cue
+_CROSS_PAUSE = 3.0         # enjamber une pause >= gap_split (+ par seconde de pause)
+_END_DANGLING = 10.0       # finir un cue sur un mot-outil (« la », « de »…)
+_END_WEAK = 3.0            # finir sur un mot faible (« a », « est », « très »…)
+_END_PLAIN = 2.5           # finir au milieu d'une proposition, sans ponctuation
+_END_CLAUSE = 0.5          # finir sur une virgule / deux-points
+_SHORT = 8.0               # par seconde manquante sous la durée minimale
+_TINY_TEXT = 2.0           # cue de moins de 10 caractères
+_ONE_WORD = 4.0            # cue d'un seul mot
+
+# Mots qui terminent mal un cue ou une ligne sans être des mots-outils stricts.
+_WEAK_END = {
+    "a", "as", "ont", "est", "sont", "été", "être", "avoir", "va", "vont",
+    "peut", "plus", "moins", "très", "trop", "assez", "pas", "tout", "bien",
+    "aussi", "comme", "mais", "donc", "car", "si", "quand", "c'est",
+    "n'est", "qu'il", "qu'on", "parce",
+}
 
 
-def _pack_segment(seg: list[Word], rules: SegmentationRules) -> list[list[Word]]:
-    """Empaquette une phrase en autant de cues que nécessaire, en coupant aux
-    meilleures frontières (ponctuation de proposition de préférence)."""
+def _last_key(w: Word) -> str:
+    return w.text.lower().strip("'’")
+
+
+def _cue_cost(words: list[Word], i: int, j: int, rules: SegmentationRules) -> float:
+    """Coût du cue words[i:j] (j exclu) au sein de la séquence `words`."""
+    cost = _CUE_COST
+    for k in range(i + 1, j):  # ce que le cue enjambe
+        if _ends_sentence(words[k - 1]):
+            cost += _CROSS_SENTENCE
+        gap = words[k].start - words[k - 1].end
+        if gap >= rules.gap_split:
+            cost += _CROSS_PAUSE * (1.0 + gap)
+    last = words[j - 1]
+    if j < len(words):  # qualité de la coupe en fin de cue
+        gap = words[j].start - last.end
+        if _ends_sentence(last):
+            pass
+        elif last.text.rstrip().endswith(_CLAUSE_PUNCT) or gap >= rules.gap_split:
+            cost += _END_CLAUSE
+        elif _last_key(last) in _DANGLING:
+            cost += _END_DANGLING
+        elif _last_key(last) in _WEAK_END:
+            cost += _END_WEAK
+        else:
+            cost += _END_PLAIN
+    # Temps d'affichage réel : jusqu'au mot suivant (le cue est tenu jusque-là).
+    shown_until = words[j].start if j < len(words) else last.end
+    shown = shown_until - words[i].start
+    if shown < rules.min_duration:
+        cost += _SHORT * (rules.min_duration - shown)
+    if len(render(words[i:j])) < 10:
+        cost += _TINY_TEXT
+    cost += _line_break_penalty(words[i:j], rules)
+    if j - i == 1:
+        cost += _ONE_WORD
+    return cost
+
+
+_LINE_DANGLING = 6.0  # retour à la ligne forcé après un mot-outil (« sur la » / …)
+_LINE_WEAK = 1.5
+
+
+def _line_break_penalty(words: list[Word], rules: SegmentationRules) -> float:
+    """Pénalité du meilleur retour à la ligne de ce cue (0 si une seule ligne)."""
+    lines = _split_lines(words, rules)
+    if len(lines) < 2:
+        return 0.0
+    end = (lines[0].split() or [""])[-1].lower().strip("'’")
+    if end in _DANGLING:
+        return _LINE_DANGLING
+    if end in _WEAK_END:
+        return _LINE_WEAK
+    return 0.0
+
+
+def _best_cues(seq: list[Word], rules: SegmentationRules) -> list[list[Word]]:
+    """Découpage optimal d'une séquence (sans vrai silence) en cues."""
+    n = len(seq)
+    inf = float("inf")
+    best = [0.0] + [inf] * n
+    back = [0] * (n + 1)
+    for j in range(1, n + 1):
+        if j < n and not _can_break_before(seq, j):
+            continue  # jamais de coupe entre deux tokens collés
+        for i in range(j - 1, -1, -1):
+            if not _fits(seq[i:j], rules) and j - i > 1:
+                break  # en reculant, le cue ne fait que grandir
+            if best[i] == inf:
+                continue
+            c = best[i] + _cue_cost(seq, i, j, rules)
+            if c < best[j]:
+                best[j], back[j] = c, i
     cues: list[list[Word]] = []
-    rest = seg
-    while rest:
-        if _fits(rest, rules):
-            cues.append(rest)
-            break
-        # Plus grand préfixe qui tient dans un cue.
-        k = 0
-        for j in range(1, len(rest) + 1):
-            if _fits(rest[:j], rules):
-                k = j
-            else:
-                break
-        if k == 0:  # un seul mot ne tient pas (cas extrême) : on avance quand même
-            k = 1
-        split = _best_cut_index(rest, k)
-        cues.append(rest[:split])
-        rest = rest[split:]
-    return _avoid_orphan_cue(cues, rules)
-
-
-def _avoid_orphan_cue(
-    cues: list[list[Word]], rules: SegmentationRules
-) -> list[list[Word]]:
-    """Évite qu'un cue ne contienne qu'un seul mot (« meilleur. » seul) : on
-    refusionne avec le cue précédent puis on recoupe au point le plus équilibré
-    (en nombre de mots) où chaque moitié tient encore dans un cue."""
-    if len(cues) < 2 or len(cues[-1]) != 1:
-        return cues
-    merged = cues[-2] + cues[-1]
-    best: tuple[int, int] | None = None
-    for k in range(1, len(merged)):
-        if not _can_break_before(merged, k):
-            continue
-        left, right = merged[:k], merged[k:]
-        if len(right) < 2 or not _fits(left, rules) or not _fits(right, rules):
-            continue
-        score = abs(len(left) - len(right))
-        if best is None or score < best[0]:
-            best = (score, k)
-    if best is not None:
-        cues[-2:] = [merged[: best[1]], merged[best[1] :]]
-    return cues
-
-
-def _reflow_orphans(
-    groups: list[list[Word]], rules: SegmentationRules
-) -> list[list[Word]]:
-    """Recolle un cue « orphelin » (un mot, ou très court) au voisin de la MÊME
-    phrase, puis re-segmente le tout proprement.
-
-    Une micro-pause (≥ gap_split mais bien en deçà d'un vrai silence) coupe parfois
-    une phrase juste avant/après un mot court (« Galaxy, », « Et oui, »), qui se
-    retrouve seul et trop peu de temps à l'écran. On le rattache au fragment
-    contigu de la même phrase (jamais par-dessus un vrai silence ni une fin de
-    phrase), et _pack_segment ré-équilibre l'ensemble."""
-    real_silence = rules.gap_split + 1.0  # au-delà : vrai silence, on ne recolle pas
-
-    def is_orphan(g: list[Word]) -> bool:
-        return len(g) == 1 or len(render(g)) <= _ORPHAN_CHARS
-
-    i = 0
-    while i < len(groups):
-        if not is_orphan(groups[i]):
-            i += 1
-            continue
-        merge_at: int | None = None
-        # 1) fusion arrière : le cue précédent continue la phrase (ne la finit pas).
-        if i > 0:
-            prev = groups[i - 1]
-            if not _ends_sentence(prev[-1]) and (groups[i][0].start - prev[-1].end) < real_silence:
-                merge_at = i - 1
-        # 2) sinon fusion avant : l'orphelin lui-même continue la phrase.
-        if merge_at is None and i + 1 < len(groups):
-            cur = groups[i]
-            if not _ends_sentence(cur[-1]) and (groups[i + 1][0].start - cur[-1].end) < real_silence:
-                merge_at = i
-        if merge_at is None:
-            i += 1
-            continue
-        combined = groups[merge_at] + groups[merge_at + 1]
-        repacked = _pack_segment(combined, rules)
-        groups[merge_at : merge_at + 2] = repacked
-        i = merge_at + len(repacked)  # ne pas reboucler sur la zone fusionnée
-    return groups
+    j = n
+    while j > 0:
+        i = back[j]
+        cues.append(seq[i:j])
+        j = i
+    return cues[::-1]
 
 
 def _group_into_cues(words: list[Word], rules: SegmentationRules) -> list[list[Word]]:
     """Découpe la suite de mots en groupes (un groupe = un futur cue).
 
-    Trois temps : (1) on segmente aux frontières *dures* — pause ou fin de phrase ;
-    (2) on empaquette chaque phrase en cues si elle dépasse les limites ; (3) on
-    recolle les cues orphelins issus de micro-pauses (_reflow_orphans).
-    """
-    segments: list[list[Word]] = []
+    Seuls les VRAIS silences (>= gap_split + 1 s) sont des frontières imposées ;
+    fins de phrase et micro-pauses sont des coupes fortement préférées mais pas
+    obligatoires, arbitrées par le coût global (_best_cues)."""
+    real_silence = rules.gap_split + 1.0
+    seqs: list[list[Word]] = []
     current: list[Word] = []
     for w in words:
-        if current:
-            prev = current[-1]
-            gap = w.start - prev.end
-            if gap >= rules.gap_split or _ends_sentence(prev):
-                segments.append(current)
-                current = []
+        if current and w.start - current[-1].end >= real_silence:
+            seqs.append(current)
+            current = []
         current.append(w)
     if current:
-        segments.append(current)
-
+        seqs.append(current)
     groups: list[list[Word]] = []
-    for seg in segments:
-        groups.extend(_pack_segment(seg, rules))
-    return _reflow_orphans(groups, rules)
+    for seq in seqs:
+        groups.extend(_best_cues(seq, rules))
+    return groups
 
 
 def _split_lines(words: list[Word], rules: SegmentationRules) -> list[str]:
@@ -283,9 +317,11 @@ def _split_lines(words: list[Word], rules: SegmentationRules) -> list[str]:
         s = float(abs(l1 - l2))                       # priorité : équilibre
         last = words[k - 1].text
         if last.rstrip().endswith((".", "!", "?", "…", ",", ";", ":")):
-            s -= 2                                     # léger bonus ponctuation
+            s -= 3                                     # bonus ponctuation
         if last.lower().strip("'’") in _DANGLING:
-            s += 6                                     # éviter un mot-outil pendu
+            s += 10                                    # éviter un mot-outil pendu
+        elif last.lower().strip("'’") in _WEAK_END:
+            s += 3                                     # ni un mot faible (« est »)
         if k == 1 or k == len(words) - 1:
             s += 12                                    # ne pas isoler un seul mot
         #                                                sur une ligne (« IA. » seul)
@@ -305,7 +341,7 @@ def segment(words: list[Word], rules: SegmentationRules) -> list[Cue]:
     cues: list[Cue] = []
 
     for idx, group in enumerate(groups, start=1):
-        start = group[0].start
+        start = max(0.0, group[0].start - rules.lead_in)
         end = group[-1].end
         lines = _split_lines(group, rules)
 

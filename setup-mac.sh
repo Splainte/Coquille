@@ -64,10 +64,16 @@ source .venv/bin/activate
 python3 -m pip install --quiet --upgrade pip
 python3 -m pip install --quiet -r requirements.txt
 ok "dépendances installées"
+# Recalage précis du timing des mots (PyTorch, optionnel : repli sur Whisper).
+if python3 -m pip install --quiet -r requirements-align.txt; then
+  ok "recalage du timing installé"
+else
+  warn "recalage du timing non installé (timing Whisper utilisé)"
+fi
 
 # Vérif rapide : la suite de tests passe ?
 if python3 -m unittest discover -s tests >/dev/null 2>&1; then
-  ok "19 tests backend : OK"
+  ok "tests backend : OK"
 else
   warn "les tests backend n'ont pas tous passé (à vérifier plus tard)"
 fi
@@ -85,14 +91,9 @@ Puis dans Premiere Pro :
 
   1. Ouvre un projet avec une séquence active.
   2. Menu  Fenêtre ▸ Extensions ▸ « Coquille — Sous-titres ».
-  3. Clique  🔍 Diagnostic spike  → envoie-moi la liste ✓/✗.
+  3. Choisis le média, clique « 1. Générer les sous-titres ».
 
-Reste 2 actions manuelles (Premiere ne sait pas les scripter), pour le flux complet :
-
-  • Créer un preset audio WAV :
-      Fichier ▸ Exporter ▸ Média ▸ Format « Waveform Audio » ▸ 💾 Enregistrer le préréglage.
-  • Coller son chemin .epr dans  cep-panel/js/main.js  (variable AUDIO_PRESET_PATH).
-      Les presets sont ici :
-      ~/Documents/Adobe/Adobe Media Encoder/*/Presets/
+Correction IA : mets ta clé OpenRouter dans backend/.env (modèle : backend/.env.example).
+Le préréglage audio WAV est celui livré avec Premiere, trouvé automatiquement.
 
 EOF

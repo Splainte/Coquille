@@ -181,7 +181,8 @@ class TestSegment(unittest.TestCase):
     def test_no_empty_frame_when_no_real_silence(self):
         rules = SegmentationRules(min_duration=0.1, gap_split=0.6, max_hold_gap=0.5,
                                   max_chars_per_line=40)
-        words = [W("Oui.", 0.0, 0.3), W("Non.", 0.6, 0.3)]  # écart 0.3 < hold
+        words = [W("Oui,", 0.0, 0.3), W("bien", 0.3, 0.3), W("sûr.", 0.6, 0.3),
+                 W("Pas", 1.2, 0.3), W("du", 1.5, 0.3), W("tout.", 1.8, 0.3)]  # écart 0.3 < hold
         cues = segment(words, rules)
         self.assertEqual(len(cues), 2)
         self.assertAlmostEqual(cues[0].end, cues[1].start)  # coupe directe, sans blanc
@@ -189,7 +190,8 @@ class TestSegment(unittest.TestCase):
     def test_keeps_blank_on_real_silence(self):
         rules = SegmentationRules(min_duration=0.1, gap_split=0.6, max_hold_gap=0.5,
                                   max_chars_per_line=40)
-        words = [W("Oui.", 0.0, 0.3), W("Non.", 1.4, 0.3)]  # écart 1.1 = vrai silence
+        words = [W("Oui,", 0.0, 0.3), W("bien", 0.3, 0.3), W("sûr.", 0.6, 0.3),
+                 W("Pas", 2.0, 0.3), W("du", 2.3, 0.3), W("tout.", 2.6, 0.3)]  # écart 1.1 = vrai silence
         cues = segment(words, rules)
         self.assertEqual(len(cues), 2)
         self.assertLess(cues[0].end, cues[1].start)  # blanc conservé
@@ -199,7 +201,8 @@ class TestSegment(unittest.TestCase):
         # le plancher de durée min poussait sa fin après le début du suivant).
         rules = SegmentationRules(min_duration=1.0, gap_split=0.6,
                                   max_hold_gap=0.5, max_chars_per_line=40)
-        words = [W("Oui.", 23.9, 0.16), W("Bon", 24.04, 0.3), W("alors", 24.34, 0.3)]
+        words = [W("C'est", 23.6, 0.1), W("vrai.", 23.7, 0.16), W("Bon", 24.04, 0.3),
+                 W("alors", 24.34, 0.3), W("on", 24.64, 0.2), W("continue.", 24.84, 0.4)]
         cues = segment(words, rules)
         self.assertGreaterEqual(len(cues), 2)
         for a, b in zip(cues, cues[1:]):
@@ -250,6 +253,31 @@ class TestSegment(unittest.TestCase):
         self.assertLessEqual(abs(len(lines[0]) - len(lines[1])), 4)
         for ln in lines:
             self.assertLessEqual(len(ln), 24)
+
+    def test_no_short_sentence_tail(self):
+        # Régression (vidéo Volvo) : un remplissage glouton laissait la fin de
+        # phrase seule à l'écran (« de la batterie. » 0,4 s). Le découpage
+        # optimal répartit la phrase pour qu'aucun cue ne flashe.
+        rules = SegmentationRules(max_chars_per_line=24, min_duration=1.0)
+        toks = ("Et ça charge entre 16 et 19 minutes selon "
+                "la taille de la batterie.").split()
+        words = [W(t, i * 0.25, 0.25) for i, t in enumerate(toks)]
+        cues = segment(words, rules)
+        self.assertGreaterEqual(len(cues), 2)
+        for c in cues:
+            self.assertGreaterEqual(c.duration, 0.9, c.text)
+
+    def test_cue_does_not_end_on_function_word(self):
+        # « le développement et la » | « production… » : interdit en fin de cue.
+        rules = SegmentationRules(max_chars_per_line=24, min_duration=0.5)
+        toks = ("le développement et la production de ce EX60 "
+                "restent en Suède.").split()
+        words = [W(t, i * 0.3, 0.3) for i, t in enumerate(toks)]
+        cues = segment(words, rules)
+        self.assertGreaterEqual(len(cues), 2)
+        for c in cues[:-1]:
+            last = c.text.split()[-1].lower()
+            self.assertNotIn(last, ("la", "de", "et", "le", "ce"), c.text)
 
     def test_no_orphan_word_as_own_cue(self):
         # Régression : "...encore meilleur." laissait "meilleur." seul dans un
@@ -393,6 +421,14 @@ class TestTranscriptionLayer(unittest.TestCase):
         self.assertEqual(words[0].confidence, 0.91)
         self.assertIsNone(words[1].confidence)
 
+    def test_fw_drops_no_speech_hallucination(self):
+        # « Générique » inventé sur de la musique : no_speech_prob élevé + doute.
+        hallu = _FWSegment([_FWWord(" Générique", 0.0, 0.56, 0.69)])
+        hallu.no_speech_prob, hallu.avg_logprob = 0.93, -0.66
+        real = _FWSegment([_FWWord(" Bonjour", 1.0, 1.4, 0.95)])
+        real.no_speech_prob, real.avg_logprob = 0.02, -0.2
+        self.assertEqual([w.text for w in _fw_segments_to_words([hallu, real])], ["Bonjour"])
+
     def test_voxtral_mapping_words_and_segment_fallback(self):
         flat = {"words": [{"text": "Bonjour", "start": 0.0, "end": 0.5}]}
         self.assertEqual([w.text for w in _voxtral_json_to_words(flat)], ["Bonjour"])
@@ -519,6 +555,51 @@ class TestCorrectLLM(unittest.TestCase):
         # le glossaire, lui, est bien appliqué (et listé dans items, pas suggestions)
         self.assertTrue(any(it.corrected == "AMOLED" for it in res.items))
 
+    def test_span_replaces_expression_within_its_time_bounds(self):
+        # « haute garde » → « haut de gamme » : 2 mots → 3, bornes conservées.
+        words = [W("version", 0.0, 0.5), W("haute", 0.5, 0.3), W("garde.", 0.8, 0.4)]
+        raw = '{"corrections": [{"de": 1, "a": 2, "texte": "haut de gamme."}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid")
+        self.assertEqual([w.text for w in res.words], ["version", "haut", "de", "gamme."])
+        self.assertAlmostEqual(res.words[1].start, 0.5)
+        self.assertAlmostEqual(res.words[-1].end, 1.2)
+        for a, b in zip(res.words, res.words[1:]):
+            self.assertLessEqual(a.end, b.start + 1e-9)  # ordre temporel intact
+        self.assertEqual(res.items[-1].original, "haute garde.")
+
+    def test_span_keeps_trailing_punctuation(self):
+        words = [W("version", 0.0, 0.5), W("Haute", 0.5, 0.3), W("Garde.", 0.8, 0.4)]
+        raw = '{"corrections": [{"de": 1, "a": 2, "texte": "haut de gamme"}]}'
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid", apply_llm=False)
+        self.assertEqual(res.suggestions[0].suggested, "haut de gamme.")
+
+    def test_span_digit_guard_and_overlap(self):
+        words = [W("plus", 0.0, 0.2), W("de", 0.2, 0.2), W("demi", 0.4, 0.2),
+                 W("chevaux.", 0.6, 0.3)]
+        raw = ('{"corrections": [{"de": 2, "a": 3, "texte": "1000 chevaux."},'
+               ' {"de": 0, "a": 1, "texte": "plus des"},'
+               ' {"de": 1, "a": 2, "texte": "x"}]}')
+        with mock.patch.object(correct_mod, "_call_openrouter", return_value=raw):
+            res = correct(words, self.g, "frandroid", apply_llm=False)
+        # chiffre ajouté → rejeté ; la plage qui chevauche la 1re gardée → ignorée
+        self.assertEqual([(s.index, s.end_index, s.suggested) for s in res.suggestions],
+                         [(0, 1, "plus des")])
+        self.assertTrue(res.warnings)
+
+    def test_segment_endpoint_applies_accepted_spans(self):
+        from fastapi.testclient import TestClient
+        from coquille.app import app
+        words = [{"text": t, "start": i * 0.3, "duration": 0.3}
+                 for i, t in enumerate("on a un tailleur très pur.".split())]
+        r = TestClient(app).post("/segment", json={
+            "media": "frandroid", "words": words,
+            "spans": [{"de": 2, "a": 3, "texte": "un intérieur"}]})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("intérieur", r.json()["srt"])
+        self.assertNotIn("tailleur", r.json()["srt"])
+
     def test_suggest_mode_respects_digit_guard(self):
         words = [W("S26", 0.0, 0.3)]
         raw = '{"words": [{"id": 0, "text": "S25"}]}'
@@ -573,8 +654,8 @@ class TestPipelineEndToEnd(unittest.TestCase):
 
 
 class TestPresets(unittest.TestCase):
-    def test_three_presets_present(self):
-        self.assertEqual(set(list_presets()), {"frandroid", "numerama", "clubic"})
+    def test_media_presets_present(self):
+        self.assertEqual(set(list_presets()), {"frandroid", "numerama", "clubic", "survoltes"})
 
     def test_preset_fields(self):
         p = load_preset("numerama")

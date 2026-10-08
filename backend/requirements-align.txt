@@ -1,0 +1,11 @@
+# OPTIONNEL — recalage précis du timing des mots (alignement forcé MMS, ~WhisperX).
+# Sans ces paquets, Coquille garde le timing de Whisper (sous-titres ~0,4 s en
+# avance après chaque pause). Modèle téléchargé au 1er usage (~1,2 Go).
+#
+# torchaudio s'est arrêté en 2.11 : torch DOIT être de la même version (sinon
+# « Could not load libtorchaudio » sous Windows).
+# Windows + GPU Nvidia :
+#   pip install -r requirements-align.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+torch==2.11.*
+torchaudio==2.11.*
+num2words>=0.5

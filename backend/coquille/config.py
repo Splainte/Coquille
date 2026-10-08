@@ -28,6 +28,9 @@ class SegmentationRules:
     max_duration: float = 6.0      # durée max d'un cue (s)
     min_gap: float = 0.08          # écart min entre deux cues (s)
     gap_split: float = 0.6         # une pause >= à ça force un nouveau cue (s)
+    lead_in: float = 0.08          # le ST apparaît ~2 images AVANT la parole
+    #                                (convention des monteurs, mesurée sur les
+    #                                shorts de référence : laisse l'œil se poser)
     max_hold_gap: float = 0.5      # écart < à ça entre deux cues = pas un vrai
     #                                silence → on tient le 1er ST jusqu'au 2nd
     #                                (coupe directe, sans image vide)
@@ -104,7 +107,21 @@ except Exception:  # un .env malformé ne doit jamais empêcher le démarrage
     pass
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.6")
+# Modèle de correction. Choisi sur banc (oct. 2026, 7 shorts Frandroid/Survoltés,
+# corrections par plages) : google/gemini-3.8-flash = 13 suggestions justes pour
+# 1 fausse ; sonnet-4.6/5.5 et gpt-5.6 en proposent nettement plus de fausses.
+DEFAULT_OPENROUTER_MODEL = "google/gemini-3.8-flash"
+# L'ancien défaut était recopié en dur dans les .env (via .env.example) : on le
+# migre, sinon les machines déjà installées resteraient bloquées dessus.
+_LEGACY_DEFAULT_MODELS = {"anthropic/claude-sonnet-4.6"}
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "").strip()
+if not OPENROUTER_MODEL or OPENROUTER_MODEL in _LEGACY_DEFAULT_MODELS:
+    OPENROUTER_MODEL = DEFAULT_OPENROUTER_MODEL
+# Effort de réflexion demandé au modèle ("" = défaut du modèle). Banc Gemini 3.8
+# Flash (7 shorts) : défaut = 14 suggestions justes / 1 fausse, ~20 s par short ;
+# "low" = 14 / 6 mais ~6 s. On privilégie la justesse (chaque fausse suggestion
+# coûte un décochage au monteur) ; "low" reste possible via le .env.
+OPENROUTER_REASONING_EFFORT = os.environ.get("OPENROUTER_REASONING_EFFORT", "").strip()
 OPENROUTER_BASE_URL = os.environ.get(
     "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
 )
@@ -113,6 +130,9 @@ OPENROUTER_BASE_URL = os.environ.get(
 CORRECT_OFFLINE = os.environ.get("COQUILLE_CORRECT_OFFLINE", "") == "1"
 
 # --- Transcription ---
+# Recalage du timing des mots par alignement forcé (si torch/torchaudio sont
+# installés, cf. requirements-align.txt). "0" pour le désactiver.
+FORCED_ALIGN = os.environ.get("COQUILLE_FORCED_ALIGN", "1") != "0"
 # Moteur par défaut quand le panneau n'en impose pas ("auto" = selon le matériel).
 DEFAULT_ENGINE = os.environ.get("COQUILLE_ENGINE", "auto")
 # Voxtral via l'API Mistral (moteur "voxtral").

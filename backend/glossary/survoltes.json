@@ -1,0 +1,20 @@
+{
+  "_comment": "Spécifique Survoltés : voitures électriques, recharge, constructeurs. N'ajouter que des erreurs de transcription constatées ou évidentes.",
+  "terms": [
+    { "canonical": "kWh", "aliases": ["kilowattheure", "kilowattheures", "kilowatt heure", "kilowatts heure"], "note": "unité de batterie" },
+    { "canonical": "kW", "aliases": ["kilowatt", "kilowatts"], "note": "unité de puissance de recharge" },
+    { "canonical": "WLTP", "aliases": ["w l t p", "wltp", "double v l t p"], "note": "cycle d'homologation de l'autonomie" },
+    { "canonical": "Tesla", "aliases": ["tesla"] },
+    { "canonical": "Superchargeur", "aliases": ["super chargeur", "supercharger"], "note": "bornes Tesla" },
+    { "canonical": "BYD", "aliases": ["b y d", "bi wai di"] },
+    { "canonical": "Xpeng", "aliases": ["x peng", "xpang", "ix peng"] },
+    { "canonical": "Stellantis", "aliases": ["stélantis", "stelantis"] },
+    { "canonical": "Hyundai", "aliases": ["hyundaï", "hyndai", "yundai"] },
+    { "canonical": "Ioniq", "aliases": ["ionic", "ioniq"] },
+    { "canonical": "Skoda", "aliases": ["škoda", "scoda"] },
+    { "canonical": "Epiq", "aliases": ["epic"], "note": "Skoda Epiq (petit SUV électrique)" },
+    { "canonical": "i-Cockpit", "aliases": ["i cockpit", "ecopit", "écopit", "aïe cockpit"], "note": "poste de conduite Peugeot" },
+    { "canonical": "pompe à chaleur", "aliases": ["pompe a chaleur"] },
+    { "canonical": "Cx", "aliases": ["c x", "cx"], "note": "coefficient de pénétration dans l'air" }
+  ]
+}
