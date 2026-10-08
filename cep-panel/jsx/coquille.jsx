@@ -14,11 +14,33 @@
 // --- 1. Rendu audio de la séquence active -----------------------------------
 // presetPath = chemin d'un .epr audio (WAV). workAreaType : 0=séquence entière,
 // 1=in→out, 2=zone de travail. exportAsMediaDirect est synchrone côté script.
+// Préréglages WAV livrés avec Premiere (Settings/EncoderPresets), du plus adapté
+// à Whisper (16 kHz mono = son format natif) au plus courant. Évite au monteur de
+// créer un .epr à la main.
+var COQUILLE_SYSTEM_PRESETS = ["WAV_Mono_16bit_16kHz.epr", "Wave48mono16.epr"];
+
+function coquilleDefaultAudioPreset() {
+  var base = String(app.path || "").replace(/[\\\/]+$/, "");
+  // Windows : <install>/Settings ; macOS : app.path peut viser le dossier
+  // d'installation ou le bundle .app → on essaie aussi Contents/.
+  var roots = [base, base + "/Contents"];
+  for (var r = 0; r < roots.length; r++) {
+    for (var i = 0; i < COQUILLE_SYSTEM_PRESETS.length; i++) {
+      var f = new File(roots[r] + "/Settings/EncoderPresets/" + COQUILLE_SYSTEM_PRESETS[i]);
+      if (f.exists) { return f.fsName; }
+    }
+  }
+  return "";
+}
+
 function coquilleExportAudio(outputPath, presetPath, workAreaType) {
   if (!app.project) { return "ERREUR: aucun projet ouvert"; }
   var seq = app.project.activeSequence;
   if (!seq) { return "ERREUR: aucune séquence active"; }
-  if (!presetPath) { return "ERREUR: presetPath (.epr audio WAV) manquant"; }
+  if (!presetPath) { presetPath = coquilleDefaultAudioPreset(); }
+  if (!presetPath) {
+    return "ERREUR: aucun préréglage audio WAV trouvé (ni config, ni préréglage système Premiere)";
+  }
 
   var wat = (workAreaType === undefined || workAreaType === null) ? 0 : workAreaType;
   try {

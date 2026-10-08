@@ -9,7 +9,9 @@
  *   ~/Documents/Adobe/Adobe Media Encoder/<version>/Presets/
  */
 window.COQUILLE = {
-  audioPresetPath: "/Users/<toi>/Documents/Adobe/Adobe Media Encoder/26.0/Presets/Coquille WAV.epr",
+  // audioPresetPath : OPTIONNEL — par défaut, le préréglage WAV livré avec Premiere
+  // est trouvé automatiquement. À renseigner seulement pour forcer un .epr perso :
+  // audioPresetPath: "/Users/<toi>/Documents/Adobe/Adobe Media Encoder/26.0/Presets/Coquille WAV.epr",
 
   // --- Backend (optionnel) ---
   // Par défaut le backend est local (http://127.0.0.1:8765, même machine que Premiere).

@@ -1,4 +1,4 @@
-"""API REST (FastAPI) appelée par le panneau UXP.
+"""API REST (FastAPI) appelée par le panneau CEP.
 
 Lancer :  uvicorn coquille.app:app --host 127.0.0.1 --port 8765
 
@@ -28,6 +28,7 @@ from dataclasses import replace
 
 from . import config
 from .config import list_presets, load_preset
+from .correct import Span, apply_spans
 from .pipeline import process
 from .segment import segment
 from .serialize import cue_to_dict, word_from_dict, word_to_dict
@@ -35,10 +36,11 @@ from .srt import to_srt
 from .transcribe import (
     list_engines,
     load_premiere_transcript,
+    refine_word_timing,
     transcribe_audio,
 )
 
-app = FastAPI(title="Coquille", version="0.1.0")
+app = FastAPI(title="Coquille", version="0.2.0")
 
 # Le panneau CEP s'exécute dans CEF depuis une origine "file://" (= "null").
 # Outil local uniquement (127.0.0.1) → on autorise toutes les origines.
@@ -67,6 +69,9 @@ class SegmentRequest(BaseModel):
     media: str
     words: list[dict]
     max_chars_per_line: Optional[int] = None
+    # Suggestions acceptées à appliquer d'abord : [{"de", "a", "texte"}] (indices
+    # dans `words`). Le backend répartit le timing des mots nouveaux.
+    spans: Optional[list[dict]] = None
 
 
 class TranscribeRequest(BaseModel):
@@ -141,6 +146,7 @@ def post_process(req: ProcessRequest) -> dict:
                     "original": s.original,
                     "suggested": s.suggested,
                     "start": round(s.start, 3),
+                    "end_index": s.index if s.end_index is None else s.end_index,
                 }
                 for s in corr.suggestions
             ],
@@ -169,6 +175,10 @@ def post_segment(req: SegmentRequest) -> dict:
         rules = replace(rules, max_chars_per_line=mcpl)
 
     words = [word_from_dict(w) for w in req.words]
+    if req.spans:
+        words = apply_spans(
+            words, [Span(int(s["de"]), int(s["a"]), str(s["texte"])) for s in req.spans]
+        )
     cues = segment(words, rules)
     return {
         "track_style": preset.track_style,
@@ -193,10 +203,12 @@ def post_transcribe(req: TranscribeRequest) -> dict:
             engine=engine,
             language=req.language,
             initial_prompt=req.initial_prompt,
+            refine_timing=False,
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"words": [word_to_dict(w) for w in words]}
+    words, timing = refine_word_timing(words, req.audio_path, req.language)
+    return {"words": [word_to_dict(w) for w in words], "timing": timing}
 
 
 @app.post("/transcribe-upload")
@@ -212,10 +224,12 @@ async def post_transcribe_upload(
         tmp_path = tmp.name
     try:
         words = transcribe_audio(
-            tmp_path, engine=engine or config.DEFAULT_ENGINE, language=language
+            tmp_path, engine=engine or config.DEFAULT_ENGINE, language=language,
+            refine_timing=False,
         )
+        words, timing = refine_word_timing(words, tmp_path, language)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         os.unlink(tmp_path)
-    return {"words": [word_to_dict(w) for w in words]}
+    return {"words": [word_to_dict(w) for w in words], "timing": timing}

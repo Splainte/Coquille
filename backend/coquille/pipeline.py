@@ -13,7 +13,7 @@ from .config import load_preset
 from .correct import CorrectionResult, correct
 from .glossary import load_glossary
 from .models import Cue, Word
-from .segment import segment
+from .segment import merge_glued, segment
 from .srt import to_srt
 
 
@@ -58,6 +58,7 @@ def process(
         words = align(whisper_words, premiere_words)
     else:
         words = list(whisper_words or premiere_words or [])
+    words = merge_glued(words)
 
     # 2. Correction (glossaire toujours appliqué ; LLM appliqué ou suggéré).
     correction = correct(words, glossary, media, offline=offline, apply_llm=apply_llm)

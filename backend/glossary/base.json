@@ -20,7 +20,7 @@
     { "canonical": "USB-C", "aliases": ["usb c", "usbc", "u s b c"] },
     { "canonical": "OLED", "aliases": ["o led", "oled", "o l e d"] },
     { "canonical": "smartphone", "aliases": ["smart phone", "smartfone"] },
-    { "canonical": "intelligence artificielle", "aliases": ["i a"], "note": "préférer la forme longue à l'oral" },
+    { "canonical": "IA", "aliases": ["i a"], "note": "intelligence artificielle : les sous-titres gardent le sigle" },
     { "canonical": "ChatGPT", "aliases": ["chat gpt", "tchat gpt", "chat g p t"] },
     { "canonical": "open source", "aliases": ["opensource", "open-source"] },
     { "canonical": "streaming", "aliases": ["streamingue", "striming"] },

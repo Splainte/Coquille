@@ -14,10 +14,9 @@ var CONFIG = window.COQUILLE || {};
 var BACKEND = CONFIG.backendUrl || "http://127.0.0.1:8765";
 var REMOTE = !!CONFIG.remoteBackend;
 
-// ⚠ À CONFIGURER : chemin d'un preset .epr "audio WAV uniquement" exporté depuis
-// Premiere (Fichier ▸ Exporter ▸ Média ▸ régler WAV ▸ Enregistrer le préréglage).
-// Config machine = fichier NON versionné cep-panel/js/config.local.js (cf. .example).
-// Sans lui, le rendu audio (donc Whisper) est indisponible.
+// Optionnel : chemin d'un preset .epr "audio WAV" personnalisé (config machine,
+// fichier NON versionné cep-panel/js/config.local.js). Vide = le JSX prend le
+// préréglage WAV livré avec Premiere (coquilleDefaultAudioPreset).
 var AUDIO_PRESET_PATH =
   (window.COQUILLE && window.COQUILLE.audioPresetPath) || "";
 
@@ -107,12 +106,11 @@ var backend = {
   getPresets: function () { return http("GET", "/presets").then(function (r) { return r.presets; }); },
   getEngines: function () { return http("GET", "/engines"); },
   transcribe: function (audioPath, engine) {
+    // → { words, timing } ; timing = "aligné" si le timing a été recalé.
     if (REMOTE) {
-      return httpUpload("/transcribe-upload", audioPath, { engine: engine, language: "fr" })
-        .then(function (r) { return r.words; });
+      return httpUpload("/transcribe-upload", audioPath, { engine: engine, language: "fr" });
     }
-    return http("POST", "/transcribe", { audio_path: audioPath, language: "fr", engine: engine })
-      .then(function (r) { return r.words; });
+    return http("POST", "/transcribe", { audio_path: audioPath, language: "fr", engine: engine });
   },
   process: function (payload) { return http("POST", "/process", payload); },
   // Re-segmentation de mots déjà corrigés (après validation des suggestions).
@@ -120,7 +118,8 @@ var backend = {
 };
 
 // État de la revue en cours (suggestions LLM à valider avant insertion).
-// words = mots après glossaire (base) ; accepted = { index: textProposé }.
+// words = mots après glossaire (base) ; accepted = { index: suggestion } — une
+// suggestion remplace la plage de mots [index, end_index] par `suggested`.
 var review = { media: null, maxChars: null, words: [], accepted: {} };
 
 // --- Initialisation ---------------------------------------------------------
@@ -132,6 +131,14 @@ function init() {
       var opt = document.createElement("option");
       opt.value = p.media; opt.textContent = p.label;
       sel.appendChild(opt);
+    });
+    // Dernier média choisi, mémorisé (sinon on retomberait sur le 1er : Clubic).
+    try {
+      var m = window.localStorage.getItem("coquille.media");
+      if (m && presets.some(function (p) { return p.media === m; })) { sel.value = m; }
+    } catch (e) {}
+    sel.addEventListener("change", function () {
+      try { window.localStorage.setItem("coquille.media", sel.value); } catch (e) {}
     });
     setStatus("Prêt." + (REMOTE ? " (backend distant)" : ""));
   }).catch(function (e) {
@@ -173,13 +180,8 @@ function onGenerate() {
   var offline = $("offline").checked;
   var maxChars = parseInt($("maxchars").value, 10) || null;
 
-  if (!AUDIO_PRESET_PATH) {
-    setStatus("Preset audio non configuré (window.COQUILLE.audioPresetPath dans " +
-      "cep-panel/js/config.local.js) — rendu audio impossible.");
-    return;
-  }
-
   var tmpWav = "";
+  var timingInfo = "";
   setBusy(true);
   setStatus("Rendu audio de la séquence…");
   // os.tmpdir via Node (CEP : --enable-nodejs)
@@ -194,12 +196,20 @@ function onGenerate() {
     .then(function (res) {
       var wav = res.indexOf("OK:") === 0 ? res.slice(3) : tmpWav;
       setStatus("Transcription (" + engine + ")…");
-      return backend.transcribe(wav, engine).then(function (words) {
+      return backend.transcribe(wav, engine).then(function (r) {
         rmFile(wav);  // WAV inutile une fois transcrit
-        return words;
+        timingInfo = r.timing || "";
+        return r.words;
       });
     })
     .then(function (whisperWords) {
+      if (!whisperWords || !whisperWords.length) {
+        // Musique seule / silence : rien à sous-titrer (ce n'est pas une erreur).
+        var info = new Error("Aucune parole détectée dans la séquence " +
+          "(musique ou silence seul) : rien à sous-titrer.");
+        info.isInfo = true;
+        throw info;
+      }
       setStatus("Alignement, correction et segmentation…");
       return backend.process({
         media: media, whisper_words: whisperWords, offline: offline,
@@ -219,28 +229,31 @@ function onGenerate() {
       setStatus(
         result.cues.length + " sous-titres générés. " +
         correctionSummary(result.correction) +
+        (timingInfo === "aligné" ? "Timing recalé sur la voix. "
+          : timingInfo ? "Timing Whisper (recalage " + timingInfo + "). " : "") +
         "Track Style : " + result.track_style
       );
       $("insert").disabled = false;
     })
-    .catch(function (e) { setBusy(false); setStatus("Erreur : " + e.message); });
+    .catch(function (e) {
+      setBusy(false);
+      setStatus((e.isInfo ? "" : "Erreur : ") + e.message);
+    });
 }
 
 // Applique au tableau de mots de base les suggestions cochées, puis re-segmente
 // côté backend et met à jour l'aperçu + le SRT à insérer.
 function applyReview() {
-  var words = review.words.map(function (w, i) {
-    if (Object.prototype.hasOwnProperty.call(review.accepted, i)) {
-      var copy = {}; for (var k in w) { copy[k] = w[k]; }
-      copy.text = review.accepted[i];
-      return copy;
-    }
-    return w;
-  }).filter(function (w) { return w.text !== ""; });  // suppressions acceptées
+  // Le backend applique les plages (et répartit le timing des mots nouveaux).
+  var spans = Object.keys(review.accepted).map(function (k) {
+    var sg = review.accepted[k];
+    return { de: sg.index, a: sg.end_index, texte: sg.suggested };
+  });
 
   setStatus("Mise à jour des sous-titres…");
   return backend.segment({
-    media: review.media, words: words, max_chars_per_line: review.maxChars,
+    media: review.media, words: review.words, spans: spans,
+    max_chars_per_line: review.maxChars,
   }).then(function (r) {
     if (lastResult) { lastResult.srt = r.srt; lastResult.track_style = r.track_style; }
     renderCues(r.cues);
@@ -336,7 +349,7 @@ function renderSuggestionSection(box, suggestions) {
     var row = document.createElement("div"); row.className = "item";
     var cb = document.createElement("input"); cb.type = "checkbox";
     cb.addEventListener("change", function () {
-      if (cb.checked) { review.accepted[sg.index] = sg.suggested; }
+      if (cb.checked) { review.accepted[sg.index] = sg; }
       else { delete review.accepted[sg.index]; }
       applyReview();
     });
@@ -354,7 +367,7 @@ function renderSuggestionSection(box, suggestions) {
 
   // Actions groupées : on coche/décoche tout, met à jour `accepted`, re-segmente once.
   allBtn.addEventListener("click", function () {
-    suggestions.forEach(function (sg) { review.accepted[sg.index] = sg.suggested; });
+    suggestions.forEach(function (sg) { review.accepted[sg.index] = sg; });
     boxes.forEach(function (cb) { cb.checked = true; });
     applyReview();
   });

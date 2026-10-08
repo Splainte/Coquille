@@ -47,7 +47,7 @@ REM --- 3. config.local.js ---
 echo [3/4] Config machine...
 if not exist "%PANEL%\js\config.local.js" (
   copy "%PANEL%\js\config.local.example.js" "%PANEL%\js\config.local.js" >nul
-  echo   -^> config.local.js cree : EDITE-LE pour renseigner audioPresetPath (.epr^)
+  echo   -^> config.local.js cree (optionnel : le preset audio WAV de Premiere est trouve tout seul^)
 ) else (
   echo   -^> config.local.js deja present, inchange
 )
@@ -62,12 +62,15 @@ python -m pip install --upgrade pip >nul
 pip install -r requirements.txt
 echo   Libs CUDA 12 (cuBLAS/cuDNN/runtime) pour le GPU...
 pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
+echo   Recalage precis du timing (PyTorch, ~2,5 Go, optionnel)...
+pip install -r requirements-align.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+if errorlevel 1 echo   -^> recalage du timing non installe : Coquille utilisera le timing Whisper.
 popd
 
 echo.
 echo ============================================
 echo  Termine.
-echo  1^) Edite cep-panel\js\config.local.js (audioPresetPath^)
+echo  1^) Mets ta cle OpenRouter dans backend\.env (modele : backend\.env.example^)
 echo  2^) Lance run-backend.bat
 echo  3^) Redemarre Premiere : Fenetre ^> Extensions ^> Coquille
 echo.

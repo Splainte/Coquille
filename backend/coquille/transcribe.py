@@ -16,6 +16,7 @@ import glob
 import os
 from typing import Any
 
+from . import config
 from .models import Word
 
 _cuda_dll_ready = False
@@ -158,10 +159,25 @@ def list_engines() -> dict:
     }
 
 
+# Segment « sans parole » que Whisper transcrit quand même (musique, bruit) :
+# « Générique » sur un short musical avait no_speech_prob=0.93, avg_logprob=-0.66.
+# Sur 7 shorts parlés, aucun vrai segment ne dépasse no_speech_prob=0.3.
+NO_SPEECH_MAX = 0.6
+LOGPROB_DOUBT = -0.4
+
+
+def _is_hallucination(seg) -> bool:
+    nsp = getattr(seg, "no_speech_prob", None)
+    lp = getattr(seg, "avg_logprob", None)
+    return nsp is not None and lp is not None and nsp >= NO_SPEECH_MAX and lp < LOGPROB_DOUBT
+
+
 def _fw_segments_to_words(segments) -> list[Word]:
     """Convertit les segments faster-whisper (objets .words) en list[Word]."""
     words: list[Word] = []
     for seg in segments:
+        if _is_hallucination(seg):
+            continue
         for w in getattr(seg, "words", None) or []:
             text = (w.word or "").strip()
             if not text:
@@ -180,6 +196,10 @@ def _fw_segments_to_words(segments) -> list[Word]:
     return words
 
 
+# Modèles faster-whisper déjà chargés, gardés en mémoire entre deux requêtes.
+_MODELS: dict[tuple[str, str, str], object] = {}
+
+
 def _faster_whisper_transcribe(
     audio_path: str, model_name: str, language: str, initial_prompt: str | None
 ) -> list[Word]:
@@ -192,12 +212,21 @@ def _faster_whisper_transcribe(
         ) from exc
 
     device, compute_type = detect_hardware()
-    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+    key = (model_name, device, compute_type)
+    model = _MODELS.get(key)
+    if model is None:  # chargement unique (large-v3 ≈ 3 Go, plusieurs secondes)
+        model = _MODELS[key] = WhisperModel(
+            model_name, device=device, compute_type=compute_type
+        )
     segments, _info = model.transcribe(
         audio_path,
         language=language,
         word_timestamps=True,
         initial_prompt=initial_prompt,
+        # Filtre de détection de voix : sans lui, Whisper invente du texte sur la
+        # musique ou le silence (« Générique » sur un short sans paroles). Mesuré
+        # sur 8 shorts : aucune perte de précision sur les passages parlés.
+        vad_filter=True,
     )
     return _fw_segments_to_words(segments)
 
@@ -251,6 +280,7 @@ def transcribe_audio(
     engine: str = "auto",
     language: str = "fr",
     initial_prompt: str | None = None,
+    refine_timing: bool = True,
 ) -> list[Word]:
     """Transcrit un fichier audio en mots horodatés via le moteur choisi.
 
@@ -259,7 +289,32 @@ def transcribe_audio(
     """
     resolved = resolve_engine(engine)
     if resolved == "voxtral":
-        return _voxtral_transcribe(audio_path)
-    return _faster_whisper_transcribe(
-        audio_path, resolved, language, initial_prompt
-    )
+        words = _voxtral_transcribe(audio_path)
+    else:
+        words = _faster_whisper_transcribe(
+            audio_path, resolved, language, initial_prompt
+        )
+    if refine_timing:
+        words, _status = refine_word_timing(words, audio_path, language)
+    return words
+
+
+def refine_word_timing(
+    words: list[Word], audio_path: str, language: str = "fr"
+) -> tuple[list[Word], str]:
+    """Recalage du timing par alignement forcé, si disponible (cf. forced_align).
+    Renvoie (mots, statut) avec statut = "aligné" | "désactivé" | "non installé"
+    | "échec : …". Ne fait jamais échouer la transcription (repli = timing Whisper)."""
+    from . import forced_align
+
+    if not config.FORCED_ALIGN:
+        return words, "désactivé"
+    if not forced_align.available():
+        return words, "non installé"
+    try:
+        return forced_align.refine(words, audio_path, language), "aligné"
+    except Exception as exc:  # pragma: no cover - dépend de l'environnement
+        import logging
+
+        logging.getLogger("coquille").warning("Alignement forcé ignoré : %s", exc)
+        return words, f"échec : {type(exc).__name__}"

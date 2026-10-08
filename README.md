@@ -1,7 +1,7 @@
 # Coquille
 
 Extension Adobe Premiere Pro de **sous-titrage augmenté par LLM**, pour Frandroid,
-Numerama et Clubic. Elle corrige les erreurs de transcription sur le jargon tech
+Numerama, Clubic et Survoltés. Elle corrige les erreurs de transcription sur le jargon tech
 (noms de produits, anglicismes) tout en réutilisant la précision des timecodes,
 puis insère des sous-titres stylés par média avec un découpage de lignes équilibré.
 
@@ -14,10 +14,12 @@ Séquence Premiere
    │  (panneau CEP) rendu audio WAV (exportAsMediaDirect)
    ▼
 Backend local (FastAPI, machines maison)
-   ├─ Whisper(X) / Voxtral   → texte précis + timestamps au mot
-   ├─ alignement hybride      → texte Whisper ancré sur les timecodes Premiere
-   ├─ correction LLM          → OpenRouter + glossaire par média (timing-safe)
-   ├─ segmentation/lignes     → CPS, max car/ligne, ≤2 lignes, équilibrage
+   ├─ Whisper large-v3 (+ filtre voix) → texte + timestamps au mot
+   ├─ alignement forcé MMS (optionnel) → timing recalé sur la voix (~WhisperX)
+   ├─ correction LLM          → glossaire par média + suggestions OpenRouter
+   │                            par plages de mots (Gemini 3.8 Flash), à valider
+   ├─ découpage optimal       → coût global (pauses, ponctuation, mots-outils,
+   │                            durée d'affichage), ≤ 2 lignes équilibrées
    └─ export SRT
    ▼
 Panneau CEP
@@ -45,42 +47,33 @@ Décisions de conception et état de l'API Premiere : voir
 | `backend/presets/`  | 3 presets média (règles de segmentation + rappel du Track Style). |
 | `backend/glossary/` | Glossaires éditables (base + par média) — cœur de la correction. |
 
-## Démarrage rapide (backend)
+## Démarrage rapide
 
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt          # serveur + httpx
-# Transcription GPU (machine dédiée) :  pip install whisperx
+- **Windows** : `setup-windows.bat` (droits admin demandés), puis `run-backend.bat`.
+- **macOS** : `bash setup-mac.sh`, puis `bash run-backend.sh`.
+- Clé OpenRouter dans `backend/.env` (modèle : `backend/.env.example`). Sans clé :
+  glossaire seul.
+- Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille — Sous-titres*.
 
-export OPENROUTER_API_KEY=sk-or-...       # correction LLM (sinon mode hors-ligne)
-export OPENROUTER_MODEL=anthropic/claude-sonnet-4.6
+Tests : `cd backend && python3 -m unittest discover -s tests` (61 tests).
 
-uvicorn coquille.app:app --host 127.0.0.1 --port 8765
-```
+## État d'avancement (oct. 2026)
 
-Démo hors-ligne (sans GPU ni clé) et tests :
+Validé **de bout en bout dans Premiere 26.5.1** (Windows, RTX 4090) sur 8 shorts
+Frandroid/Survoltés, comparés à leurs sous-titres faits main :
 
-```bash
-cd backend
-python3 demo.py frandroid                 # montre alignement + correction + SRT
-python3 -m unittest discover -s tests -v  # 19 tests
-```
+- texte : ~4,4 % d'écart avec les sous-titres des monteurs une fois les
+  suggestions acceptées (dont une bonne part de choix éditoriaux : « km » vs
+  « kilomètres ») ;
+- timing : apparition à ~0,07 s en moyenne de celle des monteurs (2 images
+  d'avance sur la voix, comme eux) ;
+- lisibilité : 4 sous-titres < 0,7 s contre 54 chez les monteurs, aucun mot-outil
+  en fin de sous-titre, aucun sous-titre d'un seul mot ;
+- durée : ~20-40 s pour un short de 1-2 min (dont ~20 s de correction IA).
 
-## État d'avancement
-
-- ✅ **Backend** : pipeline complet, testé (alignement, correction glossaire,
-  segmentation/équilibrage, SRT). Correction LLM OpenRouter câblée (mode hors-ligne
-  déterministe pour les tests).
-- 🟡 **Panneau CEP** : scaffold complet (UI + `jsx/coquille.jsx` + ponts backend).
-  Spike à lancer dans Premiere via le bouton **🔍 Diagnostic** (sonde `createCaptionTrack`,
-  `exportAsMediaDirect`, backend, séquence active). 2 des 3 points reposent sur des API
-  ExtendScript documentées ; reste à confirmer sur la version cible + configurer le
-  preset audio `.epr`. La lecture du transcript natif n'est pas fiable en ExtendScript →
-  fonctionnement Whisper-seul pour l'instant.
-- ⚪ **Panneau UXP** : archivé (pas de `createCaptionTrack` en UXP, cf. `uxp-panel/README.md`).
 - 🟡 **Track Styles** : à créer une fois dans Premiere (noms `Coquille — Frandroid/
-  Numerama/Clubic`), valeurs de référence dans `backend/presets/*.json`.
+  Numerama/Clubic/Survoltés`), valeurs de référence dans `backend/presets/*.json`.
+- ⚪ **Panneau UXP** : archivé (pas de `createCaptionTrack` en UXP, cf. `uxp-panel/README.md`).
 
 ## Limites connues
 

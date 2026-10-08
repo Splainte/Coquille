@@ -6,8 +6,7 @@
 # Correction LLM (optionnelle) : exporte OPENROUTER_API_KEY avant de lancer,
 # sinon coche « Mode hors-ligne » dans le panneau (glossaire seul).
 #
-#   export OPENROUTER_API_KEY=sk-or-...
-#   export OPENROUTER_MODEL=anthropic/claude-sonnet-4.6
+#   export OPENROUTER_API_KEY=sk-or-...      (ou dans backend/.env)
 #   bash run-backend.sh
 #
 set -euo pipefail

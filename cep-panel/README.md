@@ -34,19 +34,16 @@ acceptable pour un outil interne (version Premiere épinglée). Le backend Pytho
 4. Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille — Sous-titres*.
 5. Débogage : ouvrir <http://localhost:8088> dans Chrome.
 
-## À configurer avant le rendu audio
+## Rendu audio
 
-Dans `js/main.js`, renseigner `AUDIO_PRESET_PATH` = chemin d'un preset `.epr`
-**audio WAV uniquement** (exporté depuis Premiere : *Exporter ▸ Média ▸ WAV ▸
-Enregistrer le préréglage*). Sans lui, le bouton *Générer* ne peut pas produire
-l'audio pour Whisper.
+Le panneau rend l'audio de la séquence avec le préréglage **livré avec Premiere**
+`Settings/EncoderPresets/WAV_Mono_16bit_16kHz.epr` (le format natif de Whisper),
+trouvé automatiquement par `coquilleDefaultAudioPreset()`. Pour forcer un autre
+`.epr`, renseigner `audioPresetPath` dans `js/config.local.js` (cf. l'exemple).
 
-## Spike — à valider dans Premiere
+## Banc de test
 
-Le bouton **🔍 Diagnostic spike** sonde à l'exécution :
-- joignabilité du backend `:8765` ;
-- présence réelle de `createCaptionTrack` et `exportAsMediaDirect` dans cet hôte ;
-- séquence active / `importFiles` / version Premiere / preset audio configuré.
-
-Lancer ce diagnostic en premier valide les 3 points de risque d'un coup, sur la
-vraie version de Premiere ciblée, avant d'aller plus loin.
+Le panneau a été validé de bout en bout sur Premiere 26.5.1 (Windows, PC 4090) :
+rendu audio → transcription → correction → revue des suggestions → insertion de
+la piste de sous-titres. Le banc (scripts hors dépôt, `~/projects/CoquilleLab`)
+pilote le panneau à distance via le port de débogage CEP.
