@@ -202,6 +202,17 @@ begin
   if CurPageID <> KeyPage.ID then Exit;
   KeyValue := CleanKey(KeyPage.Values[0]);
   if KeyValue = '' then Exit;  // étape passée
+  // Installation silencieuse (/KEY=…) : personne pour répondre à une question.
+  // On n'interroge pas OpenRouter ; une clé mal formée est ignorée (le panneau
+  // permettra de l'ajouter).
+  if WizardSilent then begin
+    if not LooksLikeKey(KeyValue) then begin
+      Log('Clé OpenRouter ignorée : format invalide.');
+      KeyValue := '';
+      KeyPage.Values[0] := '';
+    end;
+    Exit;
+  end;
   if not LooksLikeKey(KeyValue) then begin
     MsgBox('Ce texte ne ressemble pas à une clé OpenRouter (elle commence par sk-or-v1-).' + #13#10 +
       'Corrigez-la, ou videz le champ pour passer cette étape.', mbError, MB_OK);

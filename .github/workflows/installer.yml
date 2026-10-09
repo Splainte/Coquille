@@ -26,6 +26,7 @@ env:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -108,7 +109,13 @@ jobs:
       - name: Essai de l'installeur
         shell: pwsh
         run: |
-          $p = Start-Process -PassThru -Wait installer/Output/Coquille-Setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/TASKS=','/KEY=sk-or-v1-0000000000000000000000000000ci','/LOG=setup.log'
+          $p = Start-Process -PassThru installer/Output/Coquille-Setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/TASKS=','/KEY=sk-or-v1-0000000000000000000000000000ci','/LOG=setup.log'
+          # Une boîte de dialogue oubliée bloquerait l'installation silencieuse sans fin.
+          if (-not $p.WaitForExit(600000)) {
+            Stop-Process -Id $p.Id -Force
+            Get-Content setup.log -Tail 40
+            Write-Error "installation bloquée (10 min) : une fenêtre attend sans doute une réponse"
+          }
           if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 40; Write-Error "installation : code $($p.ExitCode)" }
           $app = "$env:LOCALAPPDATA\Coquille"
           $panel = "$env:APPDATA\Adobe\CEP\extensions\com.coquille.subtitles"
