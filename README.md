@@ -63,8 +63,12 @@ Décisions de conception et état de l'API Premiere : voir
   clé (glossaire seul), rouge = clé refusée, orange = OpenRouter injoignable. On peut aussi
   éditer `backend/.env` à la main (modèle : `backend/.env.example`).
 - Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille — Sous-titres*.
+- **Zone sous-titrée** : les points d'entrée/sortie de la séquence s'ils sont posés (seul ce
+  morceau est rendu), sinon l'étendue des clips sélectionnés, sinon toute la séquence. La zone
+  retenue est affichée sous le bouton « Générer ». Une barre d'avancement suit le chargement
+  du modèle, la transcription et le recalage du timing (avec le temps restant estimé).
 
-Tests : `cd backend && python3 -m unittest discover -s tests` (69 tests).
+Tests : `cd backend && python3 -m unittest discover -s tests` (72 tests).
 
 ## État d'avancement (oct. 2026)
 
