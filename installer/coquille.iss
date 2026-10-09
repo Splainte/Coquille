@@ -7,9 +7,10 @@
 ;   stage\panel        panneau CEP
 ;
 ; Le panneau lance lui-même le backend (Python embarqué, fenêtre cachée) : plus
-; de run-backend.bat à ouvrir. Les gros téléchargements (bibliothèques NVIDIA,
-; PyTorch pour le recalage du timing, modèles) sont des tâches facultatives
-; exécutées pendant l'installation, pour ne pas alourdir l'installeur.
+; de run-backend.bat à ouvrir. Les gros téléchargements (bibliothèques NVIDIA si
+; une carte NVIDIA est présente, PyTorch pour le recalage du timing, modèles) se
+; font toujours pendant l'installation, sans rien demander, pour ne pas alourdir
+; l'installeur. /NODOWNLOADS=1 les saute (réservé à la CI).
 ; La clé OpenRouter se saisit sur une page dédiée (facultative).
 
 #ifndef AppVersion
@@ -45,14 +46,9 @@ Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 [Messages]
 FinishedLabel=Coquille est installé.%n%nRedémarrez Premiere Pro puis ouvrez Fenêtre > Extensions > Coquille — Sous-titres. Le moteur de transcription démarre tout seul à l'ouverture du panneau.
 
-[Tasks]
-Name: "gpu"; Description: "Transcription sur la carte graphique NVIDIA : 10 à 20 fois plus rapide et modèle plus précis (téléchargement d'environ 1,3 Go)"; Check: HasNvidia
-Name: "align"; Description: "Timing des sous-titres calé précisément sur la voix (téléchargement d'environ {code:AlignSize})"
-Name: "models"; Description: "Télécharger les modèles maintenant (sinon au premier sous-titrage, ce qui le rend très long)"
-
 [InstallDelete]
 ; Code du backend et panneau : repartent propres à chaque mise à jour. Le Python
-; embarqué est conservé (les paquets ajoutés par les tâches ci-dessus pèsent
+; embarqué est conservé (les paquets téléchargés à l'installation pèsent
 ; plusieurs Go) et .env (clé OpenRouter) n'est jamais touché.
 Type: filesandordirs; Name: "{app}\backend\coquille"
 Type: filesandordirs; Name: "{#PanelDir}"
@@ -309,6 +305,12 @@ begin
   SaveStringsToUTF8File(ExpandConstant('{#PanelDir}\js\config.local.js'), Lines, False);
 end;
 
+// /NODOWNLOADS=1 : installation sans les gros téléchargements (CI).
+function SkipDownloads: Boolean;
+begin
+  Result := ExpandConstant('{param:NODOWNLOADS|0}') = '1';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Index: String;
@@ -326,22 +328,20 @@ begin
     SetEnvironmentVariable('COQUILLE_SETUP_KEY', '');
   end;
 
+  if SkipDownloads then Exit;
   WizardForm.ProgressGauge.Style := npbstMarquee;
   try
-    if WizardIsTaskSelected('gpu') then
+    if HasNvidia then
       RunPython('Bibliothèques NVIDIA (environ 1,3 Go)…',
         PipFlags + 'nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12',
         'Les bibliothèques NVIDIA n''ont pas pu être installées : la transcription se fera sur le processeur.');
-    if WizardIsTaskSelected('align') then begin
-      if HasNvidia then Index := 'cu128' else Index := 'cpu';
-      RunPython('Recalage du timing : PyTorch (' + AlignSize('') + ')…',
-        PipFlags + '-r requirements-align.txt --index-url https://download.pytorch.org/whl/' + Index +
-        ' --extra-index-url https://pypi.org/simple',
-        'Le recalage du timing n''a pas pu être installé : Coquille utilisera le timing de Whisper.');
-    end;
-    if WizardIsTaskSelected('models') then
-      RunPython('Téléchargement des modèles (plusieurs Go)…', '-m coquille.prefetch',
-        'Un modèle n''a pas pu être téléchargé : il le sera au premier sous-titrage.');
+    if HasNvidia then Index := 'cu128' else Index := 'cpu';
+    RunPython('Recalage du timing : PyTorch (' + AlignSize('') + ')…',
+      PipFlags + '-r requirements-align.txt --index-url https://download.pytorch.org/whl/' + Index +
+      ' --extra-index-url https://pypi.org/simple',
+      'Le recalage du timing n''a pas pu être installé : Coquille utilisera le timing de Whisper.');
+    RunPython('Téléchargement des modèles (plusieurs Go)…', '-m coquille.prefetch',
+      'Un modèle n''a pas pu être téléchargé : il le sera au premier sous-titrage.');
   finally
     WizardForm.ProgressGauge.Style := npbstNormal;
   end;
