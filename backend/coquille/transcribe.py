@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import glob
 import os
-from typing import Any
+from dataclasses import replace
+from typing import Any, Callable, Optional
 
 from . import config
 from .models import Word
@@ -200,9 +201,20 @@ def _fw_segments_to_words(segments) -> list[Word]:
 _MODELS: dict[tuple[str, str, str], object] = {}
 
 
+# Rappel de progression : progress(phase, fraction) avec phase = "modèle" |
+# "transcription" | "alignement" et fraction dans [0, 1] (None = indéterminée).
+Progress = Callable[[str, Optional[float]], None]
+
+
+def _noop_progress(phase: str, fraction: float | None) -> None:
+    pass
+
+
 def _faster_whisper_transcribe(
-    audio_path: str, model_name: str, language: str, initial_prompt: str | None
+    audio, model_name: str, language: str, initial_prompt: str | None,
+    progress: Progress = _noop_progress,
 ) -> list[Word]:
+    """`audio` : chemin de fichier ou tableau numpy 16 kHz mono."""
     _ensure_cuda_dll_path()
     try:
         from faster_whisper import WhisperModel  # type: ignore
@@ -215,11 +227,13 @@ def _faster_whisper_transcribe(
     key = (model_name, device, compute_type)
     model = _MODELS.get(key)
     if model is None:  # chargement unique (large-v3 ≈ 3 Go, plusieurs secondes)
+        progress("modèle", None)
         model = _MODELS[key] = WhisperModel(
             model_name, device=device, compute_type=compute_type
         )
-    segments, _info = model.transcribe(
-        audio_path,
+    progress("transcription", 0.0)
+    segments, info = model.transcribe(
+        audio,
         language=language,
         word_timestamps=True,
         initial_prompt=initial_prompt,
@@ -228,7 +242,18 @@ def _faster_whisper_transcribe(
         # sur 8 shorts : aucune perte de précision sur les passages parlés.
         vad_filter=True,
     )
-    return _fw_segments_to_words(segments)
+    # Les segments sont produits au fil de l'eau : la fin du dernier segment
+    # rapportée à la durée totale donne l'avancement.
+    duration = float(getattr(info, "duration", 0.0) or 0.0)
+
+    def tracked():
+        for seg in segments:
+            if duration > 0:
+                progress("transcription", min(1.0, float(seg.end) / duration))
+            yield seg
+        progress("transcription", 1.0)
+
+    return _fw_segments_to_words(tracked())
 
 
 def _voxtral_json_to_words(data: dict) -> list[Word]:
@@ -274,6 +299,27 @@ def _voxtral_transcribe(audio_path: str) -> list[Word]:
             return _voxtral_json_to_words(resp.json())
 
 
+SAMPLE_RATE = 16000
+
+
+def _write_wav(path: str, audio) -> None:
+    """Écrit un tableau float32 16 kHz mono en WAV 16 bits (stdlib seule)."""
+    import wave
+
+    import numpy as np
+
+    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2")
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(pcm.tobytes())
+
+
+def _shift(words: list[Word], offset: float) -> list[Word]:
+    return [replace(w, start=w.start + offset) for w in words] if offset else words
+
+
 def transcribe_audio(
     audio_path: str,
     *,
@@ -281,26 +327,57 @@ def transcribe_audio(
     language: str = "fr",
     initial_prompt: str | None = None,
     refine_timing: bool = True,
+    start: float | None = None,
+    end: float | None = None,
+    progress: Progress = _noop_progress,
 ) -> list[Word]:
     """Transcrit un fichier audio en mots horodatés via le moteur choisi.
 
     engine : "auto" (selon matériel), "large-v3", "small" ou "voxtral".
     `initial_prompt` (Whisper) biaise le modèle avec du jargon connu.
+    `start`/`end` (secondes) : ne transcrit que cette zone du fichier ; les
+    temps renvoyés restent ceux du fichier entier.
     """
     resolved = resolve_engine(engine)
+    clip = start is not None or end is not None
+    audio = audio_path
+    offset = 0.0
+    if clip:
+        from faster_whisper.audio import decode_audio
+
+        full = decode_audio(audio_path, sampling_rate=SAMPLE_RATE)
+        a = max(0.0, start or 0.0)
+        b = len(full) / SAMPLE_RATE if end is None else max(a, end)
+        audio = full[int(a * SAMPLE_RATE): int(b * SAMPLE_RATE)]
+        offset = a
+        if len(audio) < SAMPLE_RATE // 10:  # zone vide ou hors du fichier
+            return []
     if resolved == "voxtral":
-        words = _voxtral_transcribe(audio_path)
+        if clip:  # l'API veut un fichier : on écrit la zone dans un WAV temporaire
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                _write_wav(tmp_path, audio)
+                words = _voxtral_transcribe(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+        else:
+            words = _voxtral_transcribe(audio_path)
     else:
         words = _faster_whisper_transcribe(
-            audio_path, resolved, language, initial_prompt
+            audio, resolved, language, initial_prompt, progress
         )
+    words = _shift(words, offset)
     if refine_timing:
-        words, _status = refine_word_timing(words, audio_path, language)
+        words, _status = refine_word_timing(words, audio_path, language, progress)
     return words
 
 
 def refine_word_timing(
-    words: list[Word], audio_path: str, language: str = "fr"
+    words: list[Word], audio_path: str, language: str = "fr",
+    progress: Progress = _noop_progress,
 ) -> tuple[list[Word], str]:
     """Recalage du timing par alignement forcé, si disponible (cf. forced_align).
     Renvoie (mots, statut) avec statut = "aligné" | "désactivé" | "non installé"
@@ -312,7 +389,7 @@ def refine_word_timing(
     if not forced_align.available():
         return words, "non installé"
     try:
-        return forced_align.refine(words, audio_path, language), "aligné"
+        return forced_align.refine(words, audio_path, language, progress), "aligné"
     except Exception as exc:  # pragma: no cover - dépend de l'environnement
         import logging
 

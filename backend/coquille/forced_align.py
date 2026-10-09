@@ -116,7 +116,8 @@ def _align_chunk(words: list[Word], audio, language: str) -> list[tuple[float, f
     return spans_out
 
 
-def refine(words: list[Word], audio_path: str, language: str = "fr") -> list[Word]:
+def refine(words: list[Word], audio_path: str, language: str = "fr",
+           progress=None) -> list[Word]:
     """Renvoie les mots avec un timing recalé ; les mots non alignables (sans
     lettres) restent entre leurs voisins. Lève en cas d'échec (l'appelant replie)."""
     if not words:
@@ -125,8 +126,13 @@ def refine(words: list[Word], audio_path: str, language: str = "fr") -> list[Wor
 
     audio = decode_audio(audio_path, sampling_rate=SR)
     times: list[tuple[float, float] | None] = []
-    for i, j in _chunks(words):
+    chunks = _chunks(words)
+    for n, (i, j) in enumerate(chunks):
+        if progress:
+            progress("alignement", n / len(chunks))
         times.extend(_align_chunk(words[i:j], audio, language))
+    if progress:
+        progress("alignement", 1.0)
 
     out: list[Word] = []
     for w, t in zip(words, times):
