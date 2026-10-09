@@ -6,6 +6,7 @@ Endpoints :
 - GET  /presets                liste des médias disponibles
 - POST /process                pipeline complet → SRT + cues
 - POST /transcribe             (re)transcription WhisperX d'un fichier audio
+- GET  /progress/{job}         avancement d'une transcription (job_id du panneau)
 - GET  /llm                    état de la clé OpenRouter (?check=1 : la vérifie)
 - POST /llm/key                enregistre la clé OpenRouter (backend/.env)
 - DELETE /llm/key              retire la clé OpenRouter
@@ -17,6 +18,8 @@ from typing import Any, Optional
 
 import os
 import tempfile
+import threading
+import time
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -43,7 +46,7 @@ from .transcribe import (
     transcribe_audio,
 )
 
-app = FastAPI(title="Coquille", version="0.2.1")
+app = FastAPI(title="Coquille", version="0.3.0")
 
 # Le panneau CEP s'exécute dans CEF depuis une origine "file://" (= "null").
 # Outil local uniquement (127.0.0.1) → on autorise toutes les origines.
@@ -86,6 +89,41 @@ class TranscribeRequest(BaseModel):
     language: str = "fr"
     engine: str = "auto"
     initial_prompt: Optional[str] = None
+    # Zone à transcrire dans le fichier (secondes) ; None = tout le fichier.
+    start: Optional[float] = None
+    end: Optional[float] = None
+    # Identifiant choisi par le panneau pour suivre l'avancement (/progress).
+    job_id: Optional[str] = None
+
+
+# Avancement des transcriptions en cours, lu par le panneau pendant qu'il attend
+# la réponse (les routes synchrones tournent dans un pool de threads).
+_PROGRESS: dict[str, dict] = {}
+_PROGRESS_LOCK = threading.Lock()
+
+
+def _tracker(job_id: Optional[str]):
+    if not job_id:
+        return lambda phase, fraction: None
+    t0 = time.monotonic()
+
+    def report(phase: str, fraction: Optional[float]) -> None:
+        with _PROGRESS_LOCK:
+            prev = _PROGRESS.get(job_id) or {}
+            started = prev.get("phase_started") if prev.get("phase") == phase else time.monotonic()
+            _PROGRESS[job_id] = {
+                "phase": phase, "fraction": fraction, "phase_started": started,
+                "elapsed": round(time.monotonic() - t0, 1),
+            }
+
+    report("démarrage", None)
+    return report
+
+
+def _done(job_id: Optional[str]) -> None:
+    if job_id:
+        with _PROGRESS_LOCK:
+            _PROGRESS.pop(job_id, None)
 
 
 @app.get("/presets")
@@ -244,10 +282,27 @@ def get_engines() -> dict:
     return list_engines()
 
 
+@app.get("/progress/{job_id}")
+def get_progress(job_id: str) -> dict:
+    """Avancement : phase ("démarrage" | "modèle" | "transcription" | "alignement"),
+    fraction de la phase (0-1, null si inconnue), secondes écoulées et estimation
+    du temps restant de la phase."""
+    with _PROGRESS_LOCK:
+        p = dict(_PROGRESS.get(job_id) or {"phase": "inconnu", "fraction": None, "elapsed": 0})
+    f, started = p.pop("fraction"), p.pop("phase_started", None)
+    p["fraction"] = f
+    p["remaining"] = None
+    if f and f > 0.05 and started:
+        spent = time.monotonic() - started
+        p["remaining"] = round(spent * (1 - f) / f, 1)
+    return p
+
+
 @app.post("/transcribe")
 def post_transcribe(req: TranscribeRequest) -> dict:
     """Transcrit un fichier déjà présent sur la machine du backend (chemin local)."""
     engine = req.engine or config.DEFAULT_ENGINE
+    report = _tracker(req.job_id)
     try:
         words = transcribe_audio(
             req.audio_path,
@@ -255,10 +310,15 @@ def post_transcribe(req: TranscribeRequest) -> dict:
             language=req.language,
             initial_prompt=req.initial_prompt,
             refine_timing=False,
+            start=req.start,
+            end=req.end,
+            progress=report,
         )
+        words, timing = refine_word_timing(words, req.audio_path, req.language, report)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    words, timing = refine_word_timing(words, req.audio_path, req.language)
+    finally:
+        _done(req.job_id)
     return {"words": [word_to_dict(w) for w in words], "timing": timing}
 
 
@@ -267,20 +327,25 @@ async def post_transcribe_upload(
     file: UploadFile = File(...),
     engine: str = Form("auto"),
     language: str = Form("fr"),
+    start: Optional[float] = Form(None),
+    end: Optional[float] = Form(None),
+    job_id: Optional[str] = Form(None),
 ) -> dict:
     """Transcrit un WAV envoyé par le panneau (cas backend distant / autre machine)."""
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
+    report = _tracker(job_id)
     try:
         words = transcribe_audio(
             tmp_path, engine=engine or config.DEFAULT_ENGINE, language=language,
-            refine_timing=False,
+            refine_timing=False, start=start, end=end, progress=report,
         )
-        words, timing = refine_word_timing(words, tmp_path, language)
+        words, timing = refine_word_timing(words, tmp_path, language, report)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         os.unlink(tmp_path)
+        _done(job_id)
     return {"words": [word_to_dict(w) for w in words], "timing": timing}

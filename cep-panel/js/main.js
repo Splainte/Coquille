@@ -90,7 +90,9 @@ function httpUpload(path, filePath, fields) {
     catch (e) { reject(new Error("Lecture WAV impossible : " + e.message)); return; }
     var fd = new FormData();
     fd.append("file", new Blob([new Uint8Array(buf)]), "audio.wav");
-    Object.keys(fields || {}).forEach(function (k) { fd.append(k, fields[k]); });
+    Object.keys(fields || {}).forEach(function (k) {
+      if (fields[k] !== null && fields[k] !== undefined) fd.append(k, fields[k]);
+    });
     var xhr = new XMLHttpRequest();
     xhr.open("POST", BACKEND + path, true); // pas de Content-Type : boundary auto
     xhr.onload = function () {
@@ -105,13 +107,16 @@ function httpUpload(path, filePath, fields) {
 var backend = {
   getPresets: function () { return http("GET", "/presets").then(function (r) { return r.presets; }); },
   getEngines: function () { return http("GET", "/engines"); },
-  transcribe: function (audioPath, engine) {
+  transcribe: function (audioPath, engine, zone, jobId) {
     // → { words, timing } ; timing = "aligné" si le timing a été recalé.
-    if (REMOTE) {
-      return httpUpload("/transcribe-upload", audioPath, { engine: engine, language: "fr" });
-    }
-    return http("POST", "/transcribe", { audio_path: audioPath, language: "fr", engine: engine });
+    // zone = { start, end } dans le fichier (null = tout) ; jobId → /progress.
+    var body = { engine: engine, language: "fr", job_id: jobId };
+    if (zone) { body.start = zone.start; body.end = zone.end; }
+    if (REMOTE) { return httpUpload("/transcribe-upload", audioPath, body); }
+    body.audio_path = audioPath;
+    return http("POST", "/transcribe", body);
   },
+  progress: function (jobId) { return http("GET", "/progress/" + encodeURIComponent(jobId)); },
   process: function (payload) { return http("POST", "/process", payload); },
   // Re-segmentation de mots déjà corrigés (après validation des suggestions).
   segment: function (payload) { return http("POST", "/segment", payload); },
@@ -137,9 +142,48 @@ function errDetail(e) {
 var review = { media: null, maxChars: null, words: [], accepted: {} };
 
 // --- Initialisation ---------------------------------------------------------
+// --- Démarrage automatique du backend (installation par Coquille-Setup.exe) ---
+// L'installeur écrit dans config.local.js le Python embarqué et le dossier du
+// backend : si le backend ne répond pas, le panneau le lance lui-même (fenêtre
+// cachée, journal dans backendLog) et attend qu'il réponde.
+function startBackend() {
+  if (!CONFIG.backendPython || REMOTE) return false;
+  try {
+    var cp = require("child_process");
+    var port = (/:(\d+)\/?$/.exec(BACKEND) || [])[1] || "8765";
+    var args = ["-m", "coquille.serve", "--port", port];
+    if (CONFIG.backendLog) { args.push("--log", CONFIG.backendLog); }
+    var child = cp.spawn(CONFIG.backendPython, args,
+      { cwd: CONFIG.backendDir, detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    return true;
+  } catch (e) { return false; }
+}
+
+function ensureBackend() {
+  return backend.getPresets().catch(function (err) {
+    if (!startBackend()) throw err;
+    setBusy(true);
+    setStatus("Démarrage du moteur Coquille…");
+    var deadline = Date.now() + 120000;  // 1er lancement : imports + antivirus
+    return new Promise(function (resolve, reject) {
+      (function poll() {
+        backend.getPresets().then(function (p) { setBusy(false); resolve(p); }).catch(function (e) {
+          if (Date.now() > deadline) {
+            setBusy(false);
+            reject(new Error("le moteur ne démarre pas" +
+              (CONFIG.backendLog ? " (journal : " + CONFIG.backendLog + ")" : "") + "."));
+          } else { setTimeout(poll, 1000); }
+        });
+      })();
+    });
+  });
+}
+
 function init() {
   cleanupOldTmp();
-  backend.getPresets().then(function (presets) {
+  initKeyUi();
+  ensureBackend().then(function (presets) {
     var sel = $("media");
     presets.forEach(function (p) {
       var opt = document.createElement("option");
@@ -155,12 +199,9 @@ function init() {
       try { window.localStorage.setItem("coquille.media", sel.value); } catch (e) {}
     });
     setStatus("Prêt." + (REMOTE ? " (backend distant)" : ""));
-  }).catch(function (e) {
-    setStatus("Backend injoignable (lancez uvicorn sur :8765). " + e.message);
-  });
-
-  // Sélecteur de moteur de transcription (Auto affiche ce qu'il choisit ici).
-  backend.getEngines().then(function (info) {
+    refreshLlm(true);
+    return backend.getEngines();
+  }).then(function (info) {
     var sel = $("engine");
     info.engines.forEach(function (e) {
       var opt = document.createElement("option");
@@ -170,7 +211,11 @@ function init() {
         : e.label;
       sel.appendChild(opt);
     });
-  }).catch(function () { /* backend down : déjà signalé via getPresets */ });
+  }).catch(function (e) {
+    refreshLlm(false);
+    setStatus("Backend injoignable : " + e.message +
+      (CONFIG.backendPython ? "" : " Lancez run-backend.bat (ou uvicorn sur :8765)."));
+  });
 
   // Max caractères/ligne : piloté ici (indépendant du média), persisté localement.
   var saved = null;
@@ -182,7 +227,12 @@ function init() {
 
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
-  initKeyUi();
+
+  // Zone affichée à jour quand on revient sur le panneau (après avoir posé des
+  // points d'entrée/sortie ou sélectionné des clips dans la timeline).
+  refreshZone();
+  document.body.addEventListener("mouseenter", refreshZone);
+  window.addEventListener("focus", refreshZone);
 }
 
 // --- Clé OpenRouter : indicateur + menu de saisie ----------------------------
@@ -295,8 +345,66 @@ function initKeyUi() {
       });
     }
   } catch (e) { /* menu facultatif : le bouton « Clé… » suffit */ }
+}
 
-  refreshLlm(true);
+// --- Zone à sous-titrer (entrée/sortie > clips sélectionnés > tout) ---------
+function getZone() {
+  return evalScript("coquilleGetRange()").then(function (res) {
+    return JSON.parse(String(res).replace(/^OK:/, ""));
+  });
+}
+
+function zoneLabel(z) {
+  var span = " (" + fmtTc(z.start) + " → " + fmtTc(z.end) + ")";
+  if (z.mode === "inout") return "Zone : points d'entrée/sortie" + span;
+  if (z.mode === "selection") {
+    return "Zone : " + (z.count > 1 ? z.count + " clips sélectionnés" : "clip sélectionné") + span;
+  }
+  return "Zone : toute la séquence" + (z.seqEnd ? " (" + fmtTc(z.seqEnd) + ")" : "");
+}
+
+function refreshZone() {
+  if (!window.__adobe_cep__) { $("zone").textContent = "Zone : toute la séquence"; return; }
+  getZone().then(function (z) { $("zone").textContent = zoneLabel(z); })
+    .catch(function (e) { $("zone").textContent = "Zone : " + e.message; });
+}
+
+// --- Barre d'avancement de la transcription ---------------------------------
+var PHASES = {
+  "démarrage": "Préparation", "modèle": "Chargement du modèle de transcription",
+  "transcription": "Transcription", "alignement": "Recalage du timing sur la voix"
+};
+
+function showProgress(fraction) {
+  var bar = $("progress");
+  bar.classList.remove("hidden");
+  bar.classList.toggle("indeterminate", fraction === null || fraction === undefined);
+  if (fraction !== null && fraction !== undefined) {
+    $("progressFill").style.width = Math.round(fraction * 100) + "%";
+  }
+}
+
+function hideProgress() {
+  $("progress").classList.add("hidden");
+  $("progressFill").style.width = "0";
+}
+
+// Interroge /progress pendant que la requête de transcription est en cours.
+function watchProgress(jobId, prefix) {
+  var stopped = false;
+  (function tick() {
+    if (stopped) return;
+    backend.progress(jobId).then(function (p) {
+      if (stopped || p.phase === "inconnu") return;
+      showProgress(p.fraction);
+      var msg = (PHASES[p.phase] || p.phase);
+      if (p.fraction !== null && p.fraction !== undefined) msg += " " + Math.round(p.fraction * 100) + " %";
+      if (p.remaining) msg += " — encore ~" + Math.max(1, Math.round(p.remaining)) + " s";
+      else if (p.elapsed) msg += " — " + Math.round(p.elapsed) + " s";
+      setStatus(prefix + msg + "…");
+    }).catch(function () {}).then(function () { if (!stopped) setTimeout(tick, 500); });
+  })();
+  return function () { stopped = true; hideProgress(); };
 }
 
 // --- Flux génération --------------------------------------------------------
@@ -321,21 +429,42 @@ function onGenerate() {
     setBusy(false); setStatus("Node indisponible : " + e.message); return;
   }
 
-  evalScript("coquilleExportAudio(" + jsStr(tmpWav) + "," + jsStr(AUDIO_PRESET_PATH) + ",0)")
+  // Zone : entrée/sortie → seul ce morceau est rendu (rendu 1 = in→out) puis les
+  // temps sont décalés ; clips sélectionnés → rendu complet, transcription de la
+  // zone seule (temps déjà ceux de la séquence) ; sinon tout.
+  var zone = { mode: "all", start: 0, end: 0 };
+  getZone().catch(function () { return zone; })
+    .then(function (z) {
+      zone = z;
+      $("zone").textContent = zoneLabel(z);
+      setStatus("Rendu audio " + (z.mode === "inout" ? "de la zone" : "de la séquence") + "…");
+      return evalScript("coquilleExportAudio(" + jsStr(tmpWav) + "," + jsStr(AUDIO_PRESET_PATH) +
+        "," + (z.mode === "inout" ? 1 : 0) + ")");
+    })
     .then(function (res) {
       var wav = res.indexOf("OK:") === 0 ? res.slice(3) : tmpWav;
+      var jobId = "job-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
       setStatus("Transcription (" + engine + ")…");
-      return backend.transcribe(wav, engine).then(function (r) {
+      showProgress(null);
+      var stop = watchProgress(jobId, "");
+      var clip = zone.mode === "selection" ? { start: zone.start, end: zone.end } : null;
+      return backend.transcribe(wav, engine, clip, jobId).then(function (r) {
+        stop();
         rmFile(wav);  // WAV inutile une fois transcrit
         timingInfo = r.timing || "";
-        return r.words;
-      });
+        var shift = zone.mode === "inout" ? zone.start : 0;
+        return (r.words || []).map(function (w) {
+          if (shift) { w.start = w.start + shift; }
+          return w;
+        });
+      }, function (e) { stop(); throw e; });
     })
     .then(function (whisperWords) {
       if (!whisperWords || !whisperWords.length) {
         // Musique seule / silence : rien à sous-titrer (ce n'est pas une erreur).
-        var info = new Error("Aucune parole détectée dans la séquence " +
-          "(musique ou silence seul) : rien à sous-titrer.");
+        var info = new Error("Aucune parole détectée dans " +
+          (zone.mode === "all" ? "la séquence" : "la zone") +
+          " (musique ou silence seul) : rien à sous-titrer.");
         info.isInfo = true;
         throw info;
       }

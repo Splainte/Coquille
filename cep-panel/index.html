@@ -56,6 +56,14 @@
       #keyBox .row { margin-bottom: 4px; flex-wrap: wrap; }
       #keyBox button { font-size: 11px; padding: 3px 8px; }
       #keyMsg { min-height: 14px; color: #9aa; white-space: pre-wrap; }
+
+      /* Zone à sous-titrer + barre d'avancement de la transcription */
+      #zone { font-size: 11px; color: #9ab; margin: -4px 0 10px; }
+      #progress { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin: 0 0 8px; }
+      #progress.hidden { display: none; }
+      #progressFill { height: 100%; width: 0; background: #7ab; transition: width 0.4s ease; }
+      #progress.indeterminate #progressFill { width: 30%; animation: slide 1.2s ease-in-out infinite; }
+      @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
     </style>
   </head>
   <body>
@@ -99,6 +107,7 @@
     <div class="row">
       <button id="generate">1. Générer les sous-titres</button>
     </div>
+    <div id="zone" title="Points d'entrée/sortie de la séquence, sinon clips sélectionnés, sinon toute la séquence">Zone : …</div>
     <div class="row">
       <label><input type="checkbox" id="offline" /> Mode hors-ligne (glossaire seul, sans LLM)</label>
     </div>
@@ -107,6 +116,7 @@
       <div id="spinner" class="spinner hidden"></div>
       <div id="status"></div>
     </div>
+    <div id="progress" class="hidden"><div id="progressFill"></div></div>
     <div id="corrections"></div>
     <div id="cues"></div>
 
