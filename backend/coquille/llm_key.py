@@ -126,3 +126,19 @@ def set_key(key: str, path: Path | None = None) -> None:
         os.environ[ENV_KEY] = key
     else:
         os.environ.pop(ENV_KEY, None)
+
+
+def main() -> int:
+    """Utilisé par l'installeur Windows : écrit dans backend/.env la clé passée
+    par la variable d'environnement COQUILLE_SETUP_KEY (jamais en argument, pour
+    qu'elle n'apparaisse pas dans la liste des processus)."""
+    key = clean(os.environ.get("COQUILLE_SETUP_KEY", ""))
+    if not key:
+        return 0
+    write_env_value(ENV_KEY, key)
+    print(f"Clé OpenRouter enregistrée ({mask(key)}).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

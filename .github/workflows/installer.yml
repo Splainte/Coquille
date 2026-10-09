@@ -1,0 +1,139 @@
+# Fabrique l'installeur Windows de Coquille (Coquille-Setup.exe, Inno Setup).
+#
+# À la publication d'une release GitHub, il y est joint. Sur une PR qui touche à
+# l'installeur, au backend ou au panneau, il est seulement construit (onglet
+# Actions, « Artifacts ») pour pouvoir l'essayer avant de publier.
+name: installer
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - "installer/**"
+      - "backend/**"
+      - "cep-panel/**"
+      - ".github/workflows/installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Python autonome (relocalisable, pip inclus) : astral-sh/python-build-standalone
+  PYTHON_URL: "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15+20261003-x86_64-pc-windows-msvc-install_only.tar.gz"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier que le manifest est à la version de la release
+        if: github.event_name == 'release'
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name }}".TrimStart("v")
+          $manifest = Get-Content cep-panel/CSXS/manifest.xml -Raw
+          if ($manifest -notmatch [regex]::Escape("ExtensionBundleVersion=`"$tag`"")) {
+            Write-Error "manifest.xml n'est pas en version $tag : mettre à jour ExtensionBundleVersion et Version avant de publier."
+          }
+
+      - name: Python embarqué + dépendances du backend
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force stage/app | Out-Null
+          Invoke-WebRequest $env:PYTHON_URL -OutFile python.tar.gz
+          tar -xzf python.tar.gz -C stage/app
+          & stage/app/python/python.exe -m pip install --no-cache-dir --no-warn-script-location --disable-pip-version-check -r backend/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Tests unitaires (avec le Python embarqué)
+        working-directory: backend
+        shell: pwsh
+        run: |
+          & ../stage/app/python/python.exe -m unittest discover -s tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Vraie transcription (modèle tiny) d'un extrait livré avec whisper.cpp :
+      # vérifie que faster-whisper, CTranslate2 et PyAV tournent sous Windows.
+      - name: Essai de transcription
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/ggml-org/whisper.cpp/raw/v1.9.1/samples/jfk.wav -OutFile jfk.wav
+          & stage/app/python/python.exe -c "from faster_whisper import WhisperModel; m = WhisperModel('tiny', device='cpu', compute_type='int8'); s, _ = m.transcribe('jfk.wav', word_timestamps=True, vad_filter=True); t = ' '.join(x.text for x in s); print(t); assert 'country' in t.lower()"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Préparer le contenu installé
+        shell: bash
+        run: |
+          mkdir -p stage/app/backend stage/app/tools stage/panel
+          cp -r backend/coquille backend/glossary backend/presets backend/requirements.txt \
+                backend/requirements-align.txt backend/.env.example stage/app/backend/
+          find stage/app/backend -name __pycache__ -prune -exec rm -rf {} +
+          cp installer/stop-backend.ps1 stage/app/tools/
+          cp -r cep-panel/CSXS cep-panel/index.html cep-panel/js cep-panel/jsx stage/panel/
+          rm -f stage/panel/js/config.local.js stage/panel/js/config.local.example.js
+          du -sh stage/app/python stage/app/backend stage/panel
+
+      # Le backend démarre comme le fera le panneau (pythonw, dossier backend).
+      - name: Essai du backend installé
+        shell: pwsh
+        run: |
+          $p = Start-Process -PassThru -WorkingDirectory stage/app/backend -FilePath stage/app/python/pythonw.exe `
+            -ArgumentList '-m','uvicorn','coquille.app:app','--host','127.0.0.1','--port','8765'
+          $ok = $false
+          foreach ($i in 1..60) {
+            Start-Sleep 1
+            try { $r = Invoke-RestMethod http://127.0.0.1:8765/llm; $ok = $true; break } catch {}
+          }
+          Stop-Process -Id $p.Id -Force
+          if (-not $ok) { Write-Error "le backend ne répond pas" }
+          $r | ConvertTo-Json
+
+      - name: Compiler l'installeur (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $version = (Select-String -Path cep-panel/CSXS/manifest.xml -Pattern 'ExtensionBundleVersion="([^"]+)"').Matches[0].Groups[1].Value
+          & $iscc /DAppVersion=$version installer\coquille.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item installer/Output/Coquille-Setup.exe | Select-Object Name, @{n='Mo';e={[math]::Round($_.Length/1MB)}}
+
+      # Installation silencieuse réelle sur la machine de CI, puis vérifications.
+      - name: Essai de l'installeur
+        shell: pwsh
+        run: |
+          $p = Start-Process -PassThru -Wait installer/Output/Coquille-Setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/TASKS=','/KEY=sk-or-v1-0000000000000000000000000000ci','/LOG=setup.log'
+          if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 40; Write-Error "installation : code $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Coquille"
+          $panel = "$env:APPDATA\Adobe\CEP\extensions\com.coquille.subtitles"
+          foreach ($f in "$app\python\pythonw.exe", "$app\backend\coquille\app.py", "$panel\CSXS\manifest.xml", "$panel\js\config.local.js") {
+            if (-not (Test-Path $f)) { Write-Error "absent après installation : $f" }
+          }
+          Get-Content "$panel\js\config.local.js"
+          if (-not (Select-String -Path "$app\backend\.env" -Pattern '^OPENROUTER_API_KEY=sk-or-v1-0+ci$' -Quiet)) { Write-Error "clé non écrite dans .env" }
+          (Get-ItemProperty HKCU:\Software\Adobe\CSXS.12).PlayerDebugMode
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Coquille-Windows
+          path: installer/Output/Coquille-Setup.exe
+          compression-level: 0
+
+  publier:
+    if: github.event_name == 'release'
+    needs: [windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Joindre l'installeur à la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" dist/* \
+            --repo "${{ github.repository }}" --clobber

@@ -738,6 +738,12 @@ class TestLlmKey(unittest.TestCase):
                                 headers={"Origin": "https://exemple.com"})
         self.assertEqual(r.status_code, 403)
 
+    def test_setup_cli_writes_key_from_env(self):
+        k = "sk-or-v1-" + "c" * 64
+        with mock.patch.dict(os.environ, {"COQUILLE_SETUP_KEY": f" {k} "}):
+            self.assertEqual(self.llm_key.main(), 0)
+        self.assertIn(f"OPENROUTER_API_KEY={k}\n", self.env.read_text(encoding="utf-8"))
+
     def test_delete_key(self):
         self.env.write_text("OPENROUTER_API_KEY=abc\n", encoding="utf-8")
         config.OPENROUTER_API_KEY = "abc"

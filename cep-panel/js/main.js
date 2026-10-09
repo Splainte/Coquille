@@ -137,9 +137,49 @@ function errDetail(e) {
 var review = { media: null, maxChars: null, words: [], accepted: {} };
 
 // --- Initialisation ---------------------------------------------------------
+// --- Démarrage automatique du backend (installation par Coquille-Setup.exe) ---
+// L'installeur écrit dans config.local.js le Python embarqué et le dossier du
+// backend : si le backend ne répond pas, le panneau le lance lui-même (fenêtre
+// cachée, journal dans backendLog) et attend qu'il réponde.
+function startBackend() {
+  if (!CONFIG.backendPython || REMOTE) return false;
+  try {
+    var cp = require("child_process"), fs = require("fs");
+    var out = "ignore";
+    if (CONFIG.backendLog) { try { out = fs.openSync(CONFIG.backendLog, "w"); } catch (e) {} }
+    var port = (/:(\d+)\/?$/.exec(BACKEND) || [])[1] || "8765";
+    var child = cp.spawn(CONFIG.backendPython,
+      ["-m", "uvicorn", "coquille.app:app", "--host", "127.0.0.1", "--port", port],
+      { cwd: CONFIG.backendDir, detached: true, stdio: ["ignore", out, out], windowsHide: true });
+    child.unref();
+    return true;
+  } catch (e) { return false; }
+}
+
+function ensureBackend() {
+  return backend.getPresets().catch(function (err) {
+    if (!startBackend()) throw err;
+    setBusy(true);
+    setStatus("Démarrage du moteur Coquille…");
+    var deadline = Date.now() + 120000;  // 1er lancement : imports + antivirus
+    return new Promise(function (resolve, reject) {
+      (function poll() {
+        backend.getPresets().then(function (p) { setBusy(false); resolve(p); }).catch(function (e) {
+          if (Date.now() > deadline) {
+            setBusy(false);
+            reject(new Error("le moteur ne démarre pas" +
+              (CONFIG.backendLog ? " (journal : " + CONFIG.backendLog + ")" : "") + "."));
+          } else { setTimeout(poll, 1000); }
+        });
+      })();
+    });
+  });
+}
+
 function init() {
   cleanupOldTmp();
-  backend.getPresets().then(function (presets) {
+  initKeyUi();
+  ensureBackend().then(function (presets) {
     var sel = $("media");
     presets.forEach(function (p) {
       var opt = document.createElement("option");
@@ -155,12 +195,9 @@ function init() {
       try { window.localStorage.setItem("coquille.media", sel.value); } catch (e) {}
     });
     setStatus("Prêt." + (REMOTE ? " (backend distant)" : ""));
-  }).catch(function (e) {
-    setStatus("Backend injoignable (lancez uvicorn sur :8765). " + e.message);
-  });
-
-  // Sélecteur de moteur de transcription (Auto affiche ce qu'il choisit ici).
-  backend.getEngines().then(function (info) {
+    refreshLlm(true);
+    return backend.getEngines();
+  }).then(function (info) {
     var sel = $("engine");
     info.engines.forEach(function (e) {
       var opt = document.createElement("option");
@@ -170,7 +207,11 @@ function init() {
         : e.label;
       sel.appendChild(opt);
     });
-  }).catch(function () { /* backend down : déjà signalé via getPresets */ });
+  }).catch(function (e) {
+    refreshLlm(false);
+    setStatus("Backend injoignable : " + e.message +
+      (CONFIG.backendPython ? "" : " Lancez run-backend.bat (ou uvicorn sur :8765)."));
+  });
 
   // Max caractères/ligne : piloté ici (indépendant du média), persisté localement.
   var saved = null;
@@ -182,7 +223,6 @@ function init() {
 
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
-  initKeyUi();
 }
 
 // --- Clé OpenRouter : indicateur + menu de saisie ----------------------------
@@ -295,8 +335,6 @@ function initKeyUi() {
       });
     }
   } catch (e) { /* menu facultatif : le bouton « Clé… » suffit */ }
-
-  refreshLlm(true);
 }
 
 // --- Flux génération --------------------------------------------------------

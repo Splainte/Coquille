@@ -49,7 +49,13 @@ Décisions de conception et état de l'API Premiere : voir
 
 ## Démarrage rapide
 
-- **Windows** : `setup-windows.bat` (droits admin demandés), puis `run-backend.bat`.
+- **Windows (monteurs)** : télécharger `Coquille-Setup.exe` dans la dernière release GitHub et
+  le lancer (pas de droits admin). Il installe le panneau, un Python autonome avec le moteur de
+  transcription, propose l'accélération NVIDIA, le recalage du timing, le téléchargement des
+  modèles et une page « Clé API OpenRouter » (facultative). Le panneau démarre ensuite le moteur
+  tout seul. Mise à jour : relancer le nouvel installeur (clé et paquets conservés).
+  Installation silencieuse : `Coquille-Setup.exe /VERYSILENT /TASKS=gpu,align,models /KEY=sk-or-v1-…`.
+- **Windows (développement)** : `setup-windows.bat` (droits admin demandés), puis `run-backend.bat`.
 - **macOS** : `bash setup-mac.sh`, puis `bash run-backend.sh`.
 - Clé OpenRouter : bouton **Ajouter la clé** en haut du panneau (ou menu ≡ du panneau ▸
   *Clé OpenRouter…*). Elle est vérifiée auprès d'OpenRouter puis écrite dans `backend/.env`,
@@ -58,7 +64,7 @@ Décisions de conception et état de l'API Premiere : voir
   éditer `backend/.env` à la main (modèle : `backend/.env.example`).
 - Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille — Sous-titres*.
 
-Tests : `cd backend && python3 -m unittest discover -s tests` (68 tests).
+Tests : `cd backend && python3 -m unittest discover -s tests` (69 tests).
 
 ## État d'avancement (oct. 2026)
 

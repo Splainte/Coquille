@@ -8,11 +8,11 @@
   Le backend Python reste agnostique du runtime → re-port UXP futur peu coûteux.
 -->
 <ExtensionManifest Version="7.0" ExtensionBundleId="com.coquille.subtitles"
-    ExtensionBundleVersion="0.2.1"
+    ExtensionBundleVersion="0.3.0"
     ExtensionBundleName="Coquille"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="com.coquille.subtitles.panel" Version="0.2.1" />
+    <Extension Id="com.coquille.subtitles.panel" Version="0.3.0" />
   </ExtensionList>
 
   <ExecutionEnvironment>

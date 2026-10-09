@@ -13,6 +13,12 @@ window.COQUILLE = {
   // est trouvé automatiquement. À renseigner seulement pour forcer un .epr perso :
   // audioPresetPath: "/Users/<toi>/Documents/Adobe/Adobe Media Encoder/26.0/Presets/Coquille WAV.epr",
 
+  // --- Démarrage automatique du backend (écrit par Coquille-Setup.exe) ---
+  // Si le backend ne répond pas, le panneau lance ce Python (fenêtre cachée).
+  // backendPython: "C:\\Users\\<toi>\\AppData\\Local\\Coquille\\python\\pythonw.exe",
+  // backendDir: "C:\\Users\\<toi>\\AppData\\Local\\Coquille\\backend",
+  // backendLog: "C:\\Users\\<toi>\\AppData\\Local\\Coquille\\backend.log",
+
   // --- Backend (optionnel) ---
   // Par défaut le backend est local (http://127.0.0.1:8765, même machine que Premiere).
   // Pour transcrire sur un PC GPU distant, pointe son IP et active l'upload :
