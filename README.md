@@ -51,11 +51,14 @@ Décisions de conception et état de l'API Premiere : voir
 
 - **Windows** : `setup-windows.bat` (droits admin demandés), puis `run-backend.bat`.
 - **macOS** : `bash setup-mac.sh`, puis `bash run-backend.sh`.
-- Clé OpenRouter dans `backend/.env` (modèle : `backend/.env.example`). Sans clé :
-  glossaire seul.
+- Clé OpenRouter : bouton **Ajouter la clé** en haut du panneau (ou menu ≡ du panneau ▸
+  *Clé OpenRouter…*). Elle est vérifiée auprès d'OpenRouter puis écrite dans `backend/.env`,
+  effet immédiat. Une pastille indique l'état : verte = correction IA active, grise = pas de
+  clé (glossaire seul), rouge = clé refusée, orange = OpenRouter injoignable. On peut aussi
+  éditer `backend/.env` à la main (modèle : `backend/.env.example`).
 - Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille — Sous-titres*.
 
-Tests : `cd backend && python3 -m unittest discover -s tests` (61 tests).
+Tests : `cd backend && python3 -m unittest discover -s tests` (68 tests).
 
 ## État d'avancement (oct. 2026)
 

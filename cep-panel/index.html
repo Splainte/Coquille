@@ -37,10 +37,48 @@
         border-top-color: #7ab; border-radius: 50%; animation: spin 0.8s linear infinite; }
       .spinner.hidden { display: none; }
       @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* Indicateur + réglage de la clé OpenRouter */
+      #llmRow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #bbb;
+        margin: -4px 0 10px; }
+      #llmDot { width: 9px; height: 9px; border-radius: 50%; background: #666; flex: 0 0 auto; }
+      #llmDot.ok { background: #5c5; } #llmDot.warn { background: #db4; }
+      #llmDot.bad { background: #d55; } #llmDot.none { background: #777; }
+      #llmText { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #llmRow button { font-size: 10px; padding: 2px 8px; }
+      #keyBox { font-size: 11px; background: #262626; border: 1px solid #444; border-radius: 3px;
+        padding: 8px; margin-bottom: 10px; }
+      #keyBox.hidden { display: none; }
+      #keyBox p { margin: 0 0 6px; color: #aaa; line-height: 1.35; }
+      #keyBox a { color: #7ab; cursor: pointer; text-decoration: underline; }
+      #keyInput { width: 100%; box-sizing: border-box; font-size: 12px; padding: 5px 6px;
+        background: #1d1d1d; color: #eee; border: 1px solid #555; border-radius: 3px; margin-bottom: 6px; }
+      #keyBox .row { margin-bottom: 4px; flex-wrap: wrap; }
+      #keyBox button { font-size: 11px; padding: 3px 8px; }
+      #keyMsg { min-height: 14px; color: #9aa; white-space: pre-wrap; }
     </style>
   </head>
   <body>
     <h1>Coquille</h1>
+
+    <div id="llmRow" title="Correction IA (OpenRouter)">
+      <span id="llmDot"></span>
+      <span id="llmText">Clé OpenRouter : …</span>
+      <button id="llmSettings">Clé…</button>
+    </div>
+    <div id="keyBox" class="hidden">
+      <p>Clé OpenRouter pour les suggestions de correction IA. Elle est enregistrée
+        sur la machine du backend (backend/.env) et n'est jamais réaffichée.
+        <a id="keyLink">Créer une clé sur openrouter.ai</a></p>
+      <input type="password" id="keyInput" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false" />
+      <div class="row">
+        <button id="keySave">Enregistrer</button>
+        <button id="keyTest">Tester</button>
+        <button id="keyDelete">Retirer</button>
+        <button id="keyClose">Fermer</button>
+      </div>
+      <div id="keyMsg"></div>
+    </div>
 
     <div class="row">
       <label for="media">Média :</label>

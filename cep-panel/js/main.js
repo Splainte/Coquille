@@ -114,8 +114,22 @@ var backend = {
   },
   process: function (payload) { return http("POST", "/process", payload); },
   // Re-segmentation de mots déjà corrigés (après validation des suggestions).
-  segment: function (payload) { return http("POST", "/segment", payload); }
+  segment: function (payload) { return http("POST", "/segment", payload); },
+  // Clé OpenRouter : état (check = vérification réelle auprès d'OpenRouter),
+  // enregistrement (vérifiée puis écrite dans backend/.env), retrait.
+  llmStatus: function (check) { return http("GET", "/llm" + (check ? "?check=true" : "")); },
+  saveKey: function (key) { return http("POST", "/llm/key", { key: key }); },
+  deleteKey: function () { return http("DELETE", "/llm/key"); }
 };
+
+// Message lisible d'une erreur HTTP du backend (« HTTP 400 /x : {"detail": …} »).
+function errDetail(e) {
+  var m = /^HTTP \d+ [^ ]+ : ([\s\S]*)$/.exec(e.message || "");
+  if (m) {
+    try { var d = JSON.parse(m[1]).detail; if (typeof d === "string") return d; } catch (x) {}
+  }
+  return e.message;
+}
 
 // État de la revue en cours (suggestions LLM à valider avant insertion).
 // words = mots après glossaire (base) ; accepted = { index: suggestion } — une
@@ -168,6 +182,121 @@ function init() {
 
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
+  initKeyUi();
+}
+
+// --- Clé OpenRouter : indicateur + menu de saisie ----------------------------
+function renderLlm(st) {
+  var dot = $("llmDot"), txt = $("llmText"), cls = "warn", msg;
+  var hint = st.key_hint ? " (" + st.key_hint + ")" : "";
+  if (st.offline_forced) {
+    msg = "Correction IA coupée (COQUILLE_CORRECT_OFFLINE)";
+  } else if (st.state === "absente") {
+    cls = "none"; msg = "Pas de clé OpenRouter : glossaire seul";
+  } else if (st.state === "ok") {
+    cls = "ok"; msg = "Correction IA active" + hint;
+    if (st.limit_remaining !== null && st.limit_remaining !== undefined) {
+      msg += " — reste " + Number(st.limit_remaining).toFixed(2) + " $";
+    }
+  } else if (st.state === "invalide") {
+    cls = "bad"; msg = "Clé OpenRouter refusée" + hint;
+  } else if (st.state === "injoignable") {
+    msg = "OpenRouter injoignable" + hint;
+  } else {
+    msg = "Clé OpenRouter non vérifiée" + hint;
+  }
+  dot.className = cls;
+  txt.textContent = msg;
+  $("llmRow").title = msg + (st.detail ? " — " + st.detail : "") +
+    (st.model ? "\nModèle : " + st.model : "");
+  $("llmSettings").textContent = st.configured ? "Clé…" : "Ajouter la clé";
+  $("keyDelete").disabled = !st.configured;
+}
+
+function refreshLlm(check) {
+  return backend.llmStatus(check).then(renderLlm).catch(function () {
+    $("llmDot").className = "none";
+    $("llmText").textContent = "Clé OpenRouter : backend injoignable";
+  });
+}
+
+function setKeyMsg(msg) { $("keyMsg").textContent = msg; }
+
+function toggleKeyBox(show) {
+  var box = $("keyBox");
+  if (show === undefined) show = box.classList.contains("hidden");
+  box.classList.toggle("hidden", !show);
+  if (show) { setKeyMsg(""); $("keyInput").value = ""; $("keyInput").focus(); }
+}
+
+function openUrl(url) {
+  try {
+    if (window.cep && window.cep.util) { window.cep.util.openURLInDefaultBrowser(url); return; }
+  } catch (e) {}
+  try { require("child_process").exec((process.platform === "win32" ? 'start "" ' : "open ") + '"' + url + '"'); }
+  catch (e) { setKeyMsg("Ouvrez " + url + " dans votre navigateur."); }
+}
+
+function initKeyUi() {
+  $("llmSettings").addEventListener("click", function () { toggleKeyBox(); });
+  $("keyClose").addEventListener("click", function () { toggleKeyBox(false); });
+  $("keyLink").addEventListener("click", function () { openUrl("https://openrouter.ai/settings/keys"); });
+  $("keyInput").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { $("keySave").click(); }
+    if (e.key === "Escape") { toggleKeyBox(false); }
+  });
+  $("keySave").addEventListener("click", function () {
+    var key = $("keyInput").value.trim();
+    if (!key) { setKeyMsg("Collez d'abord la clé (sk-or-v1-…)."); return; }
+    setKeyMsg("Vérification auprès d'OpenRouter…");
+    backend.saveKey(key).then(function (st) {
+      $("keyInput").value = "";
+      renderLlm(st);
+      setKeyMsg(st.state === "ok"
+        ? "Clé enregistrée et valide" + (st.label ? " (« " + st.label + " »)" : "") + "."
+        : "Clé enregistrée, mais non vérifiée : " + st.detail + ".");
+      if (st.from_system_env) {
+        setKeyMsg($("keyMsg").textContent + "\n⚠ Une variable d'environnement " +
+          "OPENROUTER_API_KEY existe sur cette machine : elle reprendra le dessus " +
+          "au prochain démarrage du backend.");
+      }
+      if (st.state === "ok") { setTimeout(function () { toggleKeyBox(false); }, 1500); }
+    }).catch(function (e) { setKeyMsg(errDetail(e)); });
+  });
+  $("keyTest").addEventListener("click", function () {
+    setKeyMsg("Vérification…");
+    backend.llmStatus(true).then(function (st) {
+      renderLlm(st);
+      setKeyMsg(st.state === "absente" ? "Aucune clé enregistrée." : $("llmText").textContent +
+        (st.detail ? " — " + st.detail : "") + ".");
+    }).catch(function (e) { setKeyMsg(errDetail(e)); });
+  });
+  $("keyDelete").addEventListener("click", function () {
+    backend.deleteKey().then(function (st) {
+      renderLlm(st);
+      setKeyMsg("Clé retirée : correction par glossaire seul.");
+    }).catch(function (e) { setKeyMsg(errDetail(e)); });
+  });
+
+  // Entrées du menu du panneau (≡ en haut à droite du panneau Premiere).
+  try {
+    var cepApi = window.__adobe_cep__;
+    if (cepApi) {
+      cepApi.invokeSync("setPanelFlyoutMenu",
+        '<Menu><MenuItem Id="key" Label="Clé OpenRouter…" Enabled="true" Checked="false"/>' +
+        '<MenuItem Id="check" Label="Vérifier la clé OpenRouter" Enabled="true" Checked="false"/></Menu>');
+      cepApi.addEventListener("com.adobe.csxs.events.flyoutMenuClicked", function (ev) {
+        var data = ev && ev.data !== undefined ? ev.data : ev;
+        if (typeof data === "string") {
+          try { data = JSON.parse(data); } catch (x) { data = { menuId: (/menuId\W+(\w+)/.exec(data) || [])[1] }; }
+        }
+        if (data && data.menuId === "key") toggleKeyBox(true);
+        if (data && data.menuId === "check") { toggleKeyBox(true); $("keyTest").click(); }
+      });
+    }
+  } catch (e) { /* menu facultatif : le bouton « Clé… » suffit */ }
+
+  refreshLlm(true);
 }
 
 // --- Flux génération --------------------------------------------------------
@@ -226,6 +355,7 @@ function onGenerate() {
       };
       renderCorrections(result.correction);
       renderCues(result.cues);
+      if (result.correction && result.correction.error) { refreshLlm(true); }
       setStatus(
         result.cues.length + " sous-titres générés. " +
         correctionSummary(result.correction) +
