@@ -144,13 +144,12 @@ var review = { media: null, maxChars: null, words: [], accepted: {} };
 function startBackend() {
   if (!CONFIG.backendPython || REMOTE) return false;
   try {
-    var cp = require("child_process"), fs = require("fs");
-    var out = "ignore";
-    if (CONFIG.backendLog) { try { out = fs.openSync(CONFIG.backendLog, "w"); } catch (e) {} }
+    var cp = require("child_process");
     var port = (/:(\d+)\/?$/.exec(BACKEND) || [])[1] || "8765";
-    var child = cp.spawn(CONFIG.backendPython,
-      ["-m", "uvicorn", "coquille.app:app", "--host", "127.0.0.1", "--port", port],
-      { cwd: CONFIG.backendDir, detached: true, stdio: ["ignore", out, out], windowsHide: true });
+    var args = ["-m", "coquille.serve", "--port", port];
+    if (CONFIG.backendLog) { args.push("--log", CONFIG.backendLog); }
+    var child = cp.spawn(CONFIG.backendPython, args,
+      { cwd: CONFIG.backendDir, detached: true, stdio: "ignore", windowsHide: true });
     child.unref();
     return true;
   } catch (e) { return false; }

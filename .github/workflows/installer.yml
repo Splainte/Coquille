@@ -80,14 +80,17 @@ jobs:
       - name: Essai du backend installé
         shell: pwsh
         run: |
+          $log = "$env:RUNNER_TEMP\backend.log"
           $p = Start-Process -PassThru -WorkingDirectory stage/app/backend -FilePath stage/app/python/pythonw.exe `
-            -ArgumentList '-m','uvicorn','coquille.app:app','--host','127.0.0.1','--port','8765'
+            -ArgumentList '-m','coquille.serve','--port','8765','--log',$log
           $ok = $false
           foreach ($i in 1..60) {
             Start-Sleep 1
-            try { $r = Invoke-RestMethod http://127.0.0.1:8765/llm; $ok = $true; break } catch {}
+            if ($p.HasExited) { break }
+            try { $r = Invoke-RestMethod -TimeoutSec 2 http://127.0.0.1:8765/llm; $ok = $true; break } catch {}
           }
-          Stop-Process -Id $p.Id -Force
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          if (Test-Path $log) { Get-Content $log }
           if (-not $ok) { Write-Error "le backend ne répond pas" }
           $r | ConvertTo-Json
 
