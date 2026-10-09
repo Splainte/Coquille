@@ -753,5 +753,46 @@ class TestLlmKey(unittest.TestCase):
         self.assertEqual(self.env.read_text(encoding="utf-8"), "OPENROUTER_API_KEY=\n")
 
 
+class TestZoneEtProgression(unittest.TestCase):
+    """Transcription limitée à une zone + suivi d'avancement (/progress)."""
+
+    def test_zone_times_stay_absolute(self):
+        import numpy as np
+        from coquille import transcribe as tr
+        seen = {}
+
+        def fake_fw(audio, model, lang, prompt, progress):
+            seen["len"] = len(audio)
+            progress("transcription", 1.0)
+            return [Word(text="bonjour", start=0.5, duration=0.4)]
+
+        calls = []
+        with mock.patch("faster_whisper.audio.decode_audio", return_value=np.zeros(16000 * 30, dtype="float32")), \
+             mock.patch.object(tr, "_faster_whisper_transcribe", side_effect=fake_fw):
+            words = tr.transcribe_audio("x.wav", engine="small", refine_timing=False,
+                                        start=12.0, end=20.0, progress=lambda p, f: calls.append(p))
+        self.assertEqual(seen["len"], 16000 * 8)          # seulement la zone
+        self.assertAlmostEqual(words[0].start, 12.5)      # temps du fichier entier
+        self.assertEqual(calls, ["transcription"])
+
+    def test_zone_outside_file_is_empty(self):
+        import numpy as np
+        from coquille import transcribe as tr
+        with mock.patch("faster_whisper.audio.decode_audio", return_value=np.zeros(16000 * 5, dtype="float32")):
+            self.assertEqual(tr.transcribe_audio("x.wav", engine="small", refine_timing=False,
+                                                 start=10.0, end=20.0), [])
+
+    def test_progress_endpoint(self):
+        from fastapi.testclient import TestClient
+        from coquille import app as app_mod
+        report = app_mod._tracker("job1")
+        report("transcription", 0.5)
+        r = TestClient(app_mod.app).get("/progress/job1").json()
+        self.assertEqual((r["phase"], r["fraction"]), ("transcription", 0.5))
+        self.assertIsNotNone(r["remaining"])
+        app_mod._done("job1")
+        self.assertEqual(TestClient(app_mod.app).get("/progress/job1").json()["phase"], "inconnu")
+
+
 if __name__ == "__main__":
     unittest.main()

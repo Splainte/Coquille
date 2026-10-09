@@ -52,6 +52,49 @@ function coquilleExportAudio(outputPath, presetPath, workAreaType) {
   return "OK:" + outputPath;
 }
 
+// --- Zone à sous-titrer ------------------------------------------------------
+// Priorité : points d'entrée/sortie de la séquence, sinon clips sélectionnés,
+// sinon séquence entière. Renvoie "OK:{mode,start,end,count,seqEnd}" (secondes).
+// Points non posés : Premiere renvoie entrée = 0 et sortie = fin de séquence
+// (ou une valeur négative / hors séquence selon les versions) → « pas de zone ».
+function coquilleGetRange() {
+  if (!app.project) { return "ERREUR: aucun projet ouvert"; }
+  var seq = app.project.activeSequence;
+  if (!seq) { return "ERREUR: aucune séquence active"; }
+  var T = 254016000000;
+  var seqEnd = Number(seq.end) / T;
+  var mode = "all", a = 0, b = seqEnd, count = 0;
+
+  var inS = NaN, outS = NaN;
+  try { inS = Number(seq.getInPoint()); outS = Number(seq.getOutPoint()); } catch (e) {}
+  if (!isNaN(inS) && !isNaN(outS)) {
+    if (inS < 0) { inS = 0; }
+    if (outS <= 0 || outS > seqEnd) { outS = seqEnd; }
+    if (outS - inS > 0.2 && (inS > 0.01 || outS < seqEnd - 0.05)) {
+      mode = "inout"; a = inS; b = outS;
+    }
+  }
+
+  if (mode === "all") {
+    var sel = null;
+    try { sel = seq.getSelection(); } catch (e2) {}
+    var lo = Infinity, hi = -Infinity;
+    if (sel) {
+      for (var i = 0; i < sel.length; i++) {
+        var it = sel[i], s0 = NaN, s1 = NaN;
+        try { s0 = Number(it.start.seconds); s1 = Number(it.end.seconds); } catch (e3) {}
+        if (isNaN(s0) || isNaN(s1) || s1 <= s0) { continue; }
+        count++;
+        if (s0 < lo) { lo = s0; }
+        if (s1 > hi) { hi = s1; }
+      }
+    }
+    if (count > 0 && hi - lo > 0.2) { mode = "selection"; a = lo; b = hi; }
+  }
+  return "OK:{" + '"mode":"' + mode + '","start":' + a + ',"end":' + b +
+    ',"count":' + count + ',"seqEnd":' + seqEnd + "}";
+}
+
 // --- 2. Insertion des sous-titres (import .srt + piste caption) --------------
 function coquilleInsertCaptions(srtPath, startAtTimeSeconds) {
   if (!app.project) { return "ERREUR: aucun projet ouvert"; }
