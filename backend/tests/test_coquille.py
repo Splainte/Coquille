@@ -663,5 +663,89 @@ class TestPresets(unittest.TestCase):
         self.assertGreater(p.segmentation.max_chars_per_line, 0)
 
 
+class TestLlmKey(unittest.TestCase):
+    """Clé OpenRouter saisie depuis le panneau : .env réécrit, jamais renvoyée."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from coquille import llm_key
+        self.llm_key = llm_key
+        self.dir = tempfile.TemporaryDirectory()
+        self.env = Path(self.dir.name) / ".env"
+        self.patches = [
+            mock.patch.object(config, "ENV_PATH", self.env),
+            mock.patch.object(config, "OPENROUTER_API_KEY", ""),
+            mock.patch.dict(os.environ, {}, clear=False),
+        ]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in reversed(self.patches):
+            p.stop()
+        self.dir.cleanup()
+
+    def test_write_keeps_other_lines(self):
+        self.env.write_text("# commentaire\nOPENROUTER_API_KEY=ancienne\nCOQUILLE_ENGINE=auto\n",
+                            encoding="utf-8")
+        self.llm_key.write_env_value("OPENROUTER_API_KEY", "nouvelle")
+        self.assertEqual(self.env.read_text(encoding="utf-8"),
+                         "# commentaire\nOPENROUTER_API_KEY=nouvelle\nCOQUILLE_ENGINE=auto\n")
+
+    def test_write_appends_when_missing(self):
+        self.env.write_text("COQUILLE_ENGINE=auto", encoding="utf-8")
+        self.llm_key.write_env_value("OPENROUTER_API_KEY", "k")
+        self.assertEqual(self.env.read_text(encoding="utf-8"),
+                         "COQUILLE_ENGINE=auto\nOPENROUTER_API_KEY=k\n")
+
+    def test_clean_and_mask(self):
+        k = "sk-or-v1-" + "a" * 60 + "b1c2"
+        self.assertEqual(self.llm_key.clean(f'  OPENROUTER_API_KEY="{k}" '), k)
+        self.assertEqual(self.llm_key.clean(f"Bearer {k}"), k)
+        self.assertEqual(self.llm_key.mask(k), "sk-or-v1-…b1c2")
+        self.assertFalse(self.llm_key.looks_valid("ma clé"))
+
+    def _client(self):
+        from fastapi.testclient import TestClient
+        from coquille.app import app
+        return TestClient(app)
+
+    def test_endpoint_saves_and_never_returns_key(self):
+        k = "sk-or-v1-" + "f" * 64
+        ok = {"state": "ok", "detail": "clé valide", "label": "Vic", "limit_remaining": None}
+        with mock.patch.object(self.llm_key, "verify", return_value=ok):
+            r = self._client().post("/llm/key", json={"key": k}, headers={"Origin": "null"})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(k, r.text)
+        self.assertEqual(r.json()["key_hint"], "sk-or-v1-…ffff")
+        self.assertEqual(config.OPENROUTER_API_KEY, k)  # effet immédiat
+        self.assertIn(f"OPENROUTER_API_KEY={k}", self.env.read_text(encoding="utf-8"))
+        st = self._client().get("/llm").json()
+        self.assertTrue(st["configured"])
+        self.assertNotIn(k, str(st))
+
+    def test_endpoint_rejects_invalid_key_without_saving(self):
+        bad = {"state": "invalide", "detail": "clé refusée par OpenRouter"}
+        with mock.patch.object(self.llm_key, "verify", return_value=bad):
+            r = self._client().post("/llm/key", json={"key": "sk-or-v1-" + "0" * 64})
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(self.env.exists())
+        self.assertEqual(config.OPENROUTER_API_KEY, "")
+
+    def test_web_page_cannot_set_key(self):
+        r = self._client().post("/llm/key", json={"key": "sk-or-v1-" + "0" * 64},
+                                headers={"Origin": "https://exemple.com"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_delete_key(self):
+        self.env.write_text("OPENROUTER_API_KEY=abc\n", encoding="utf-8")
+        config.OPENROUTER_API_KEY = "abc"
+        r = self._client().delete("/llm/key")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["configured"])
+        self.assertEqual(self.env.read_text(encoding="utf-8"), "OPENROUTER_API_KEY=\n")
+
+
 if __name__ == "__main__":
     unittest.main()

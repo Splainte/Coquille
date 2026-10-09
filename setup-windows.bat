@@ -70,9 +70,9 @@ popd
 echo.
 echo ============================================
 echo  Termine.
-echo  1^) Mets ta cle OpenRouter dans backend\.env (modele : backend\.env.example^)
-echo  2^) Lance run-backend.bat
-echo  3^) Redemarre Premiere : Fenetre ^> Extensions ^> Coquille
+echo  1^) Lance run-backend.bat
+echo  2^) Redemarre Premiere : Fenetre ^> Extensions ^> Coquille
+echo  3^) Dans le panneau : bouton "Ajouter la cle" ^(cle OpenRouter creee sur openrouter.ai/settings/keys^)
 echo.
 echo  Si erreur CUDA au 1er rendu (4070/4090^), installe les libs GPU :
 echo     backend\.venv\Scripts\activate.bat

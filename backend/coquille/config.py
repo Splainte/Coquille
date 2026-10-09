@@ -80,7 +80,7 @@ def _load_dotenv(path: Path | None = None) -> None:
     l'environnement réel n'est PAS écrasée (l'env explicite gagne). Fichier
     NON versionné (cf. .gitignore) — c'est là que vit la clé OpenRouter.
     """
-    path = path or (ROOT / ".env")
+    path = path or ENV_PATH
     if not path.exists():
         return
     # Lecture tolérante à l'encodage : un .env sauvé en ANSI/cp1252 par Notepad
@@ -100,6 +100,11 @@ def _load_dotenv(path: Path | None = None) -> None:
         if key and key not in os.environ:
             os.environ[key] = value
 
+
+ENV_PATH = ROOT / ".env"
+# Clé venant d'une vraie variable d'environnement (et non du .env) : elle
+# l'emporte au démarrage sur ce que le panneau enregistre dans le .env.
+KEY_FROM_SYSTEM_ENV = bool(os.environ.get("OPENROUTER_API_KEY"))
 
 try:
     _load_dotenv()

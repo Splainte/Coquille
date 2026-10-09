@@ -6,6 +6,9 @@ Endpoints :
 - GET  /presets                liste des médias disponibles
 - POST /process                pipeline complet → SRT + cues
 - POST /transcribe             (re)transcription WhisperX d'un fichier audio
+- GET  /llm                    état de la clé OpenRouter (?check=1 : la vérifie)
+- POST /llm/key                enregistre la clé OpenRouter (backend/.env)
+- DELETE /llm/key              retire la clé OpenRouter
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import os
 import tempfile
 
 try:
-    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+    from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover
@@ -26,7 +29,7 @@ except ImportError as exc:  # pragma: no cover
 
 from dataclasses import replace
 
-from . import config
+from . import config, llm_key
 from .config import list_presets, load_preset
 from .correct import Span, apply_spans
 from .pipeline import process
@@ -40,7 +43,7 @@ from .transcribe import (
     transcribe_audio,
 )
 
-app = FastAPI(title="Coquille", version="0.2.0")
+app = FastAPI(title="Coquille", version="0.2.1")
 
 # Le panneau CEP s'exécute dans CEF depuis une origine "file://" (= "null").
 # Outil local uniquement (127.0.0.1) → on autorise toutes les origines.
@@ -72,6 +75,10 @@ class SegmentRequest(BaseModel):
     # Suggestions acceptées à appliquer d'abord : [{"de", "a", "texte"}] (indices
     # dans `words`). Le backend répartit le timing des mots nouveaux.
     spans: Optional[list[dict]] = None
+
+
+class KeyRequest(BaseModel):
+    key: str
 
 
 class TranscribeRequest(BaseModel):
@@ -185,6 +192,50 @@ def post_segment(req: SegmentRequest) -> dict:
         "srt": to_srt(cues),
         "cues": [cue_to_dict(c) for c in cues],
     }
+
+
+def _panel_only(request: Request) -> None:
+    """Écriture de la clé réservée au panneau (origine file:// → "null") : une
+    page web ouverte dans un navigateur ne doit pas pouvoir la remplacer."""
+    origin = request.headers.get("origin")
+    if origin and origin != "null" and not origin.startswith("file://"):
+        raise HTTPException(status_code=403, detail="Réservé au panneau Coquille.")
+
+
+@app.get("/llm")
+def get_llm(check: bool = False) -> dict:
+    """État de la clé OpenRouter (jamais la clé en clair)."""
+    return llm_key.status(check=check)
+
+
+@app.post("/llm/key")
+def post_llm_key(req: KeyRequest, request: Request) -> dict:
+    """Vérifie puis enregistre la clé dans backend/.env (effet immédiat)."""
+    _panel_only(request)
+    key = llm_key.clean(req.key)
+    if not llm_key.looks_valid(key):
+        raise HTTPException(status_code=400, detail="Ce texte ne ressemble pas à une clé OpenRouter (sk-or-v1-…).")
+    check = llm_key.verify(key)
+    if check["state"] == "invalide":
+        raise HTTPException(status_code=400, detail="Clé refusée par OpenRouter : vérifiez-la (non enregistrée).")
+    # OpenRouter injoignable : on enregistre quand même (vérifiable plus tard).
+    try:
+        llm_key.set_key(key)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Écriture de backend/.env impossible : {exc}")
+    out = llm_key.status()
+    out.update(check)
+    return out
+
+
+@app.delete("/llm/key")
+def delete_llm_key(request: Request) -> dict:
+    _panel_only(request)
+    try:
+        llm_key.set_key("")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Écriture de backend/.env impossible : {exc}")
+    return llm_key.status()
 
 
 @app.get("/engines")
