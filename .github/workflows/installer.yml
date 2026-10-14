@@ -1,6 +1,8 @@
-# Fabrique l'installeur Windows de Coquille (Coquille-Setup.exe, Inno Setup).
+# Fabrique les installeurs de Coquille :
+#   - Coquille-Setup.exe   (Windows, Inno Setup)
+#   - Coquille-macOS.pkg   (macOS Apple Silicon, pkgbuild)
 #
-# À la publication d'une release GitHub, il y est joint. Sur une PR qui touche à
+# À la publication d'une release GitHub, ils y sont joints. Sur une PR qui touche à
 # l'installeur, au backend ou au panneau, il est seulement construit (onglet
 # Actions, « Artifacts ») pour pouvoir l'essayer avant de publier.
 name: installer
@@ -22,6 +24,7 @@ permissions:
 env:
   # Python autonome (relocalisable, pip inclus) : astral-sh/python-build-standalone
   PYTHON_URL: "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15+20261003-x86_64-pc-windows-msvc-install_only.tar.gz"
+  PYTHON_URL_MAC: "https://github.com/astral-sh/python-build-standalone/releases/download/20261003/cpython-3.12.15+20261003-aarch64-apple-darwin-install_only.tar.gz"
 
 jobs:
   windows:
@@ -132,16 +135,105 @@ jobs:
           path: installer/Output/Coquille-Setup.exe
           compression-level: 0
 
+  # Apple Silicon seulement : PyTorch (recalage du timing) n'existe plus pour
+  # les Mac Intel depuis la 2.2.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier que le manifest est à la version de la release
+        if: github.event_name == 'release'
+        run: |
+          tag="${{ github.event.release.tag_name }}"; tag="${tag#v}"
+          grep -q "ExtensionBundleVersion=\"$tag\"" cep-panel/CSXS/manifest.xml || {
+            echo "::error::manifest.xml n'est pas en version $tag"; exit 1; }
+
+      - name: Python embarqué + dépendances du backend
+        run: |
+          mkdir -p stage/app
+          curl -fsSL "$PYTHON_URL_MAC" | tar -xz -C stage/app
+          stage/app/python/bin/python3 -m pip install --no-cache-dir --no-warn-script-location --disable-pip-version-check -r backend/requirements.txt
+
+      - name: Tests unitaires (avec le Python embarqué)
+        working-directory: backend
+        run: ../stage/app/python/bin/python3 -m unittest discover -s tests
+
+      - name: Essai de transcription
+        run: |
+          curl -fsSL -o jfk.wav https://github.com/ggml-org/whisper.cpp/raw/v1.9.1/samples/jfk.wav
+          stage/app/python/bin/python3 -c "from faster_whisper import WhisperModel; m = WhisperModel('tiny', device='cpu', compute_type='int8'); s, _ = m.transcribe('jfk.wav', word_timestamps=True, vad_filter=True); t = ' '.join(x.text for x in s); print(t); assert 'country' in t.lower()"
+
+      - name: Préparer le contenu installé
+        run: |
+          mkdir -p stage/app/backend stage/panel
+          cp -R backend/coquille backend/glossary backend/presets backend/requirements.txt \
+                backend/requirements-align.txt backend/.env.example stage/app/backend/
+          find stage -name __pycache__ -prune -exec rm -rf {} +
+          cp -R cep-panel/CSXS cep-panel/index.html cep-panel/js cep-panel/jsx stage/panel/
+          rm -f stage/panel/js/config.local.js stage/panel/js/config.local.example.js
+          du -sh stage/app/python stage/app/backend stage/panel
+
+      - name: Fenêtre de la clé (AppleScript)
+        run: COQUILLE_COMPILE_DIALOG=1 bash installer/macos/scripts/postinstall
+
+      - name: Paquet .pkg
+        run: |
+          version=$(sed -n 's/.*ExtensionBundleVersion="\([^"]*\)".*/\1/p' cep-panel/CSXS/manifest.xml)
+          mkdir -p out
+          # Rien n'est « relocalisable » : le payload va toujours dans /private/tmp.
+          pkgbuild --analyze --root stage comp.plist
+          stage/app/python/bin/python3 -c "import plistlib; p = plistlib.load(open('comp.plist', 'rb')); [b.update(BundleIsRelocatable=False) for b in p]; plistlib.dump(p, open('comp.plist', 'wb'))"
+          pkgbuild --root stage --component-plist comp.plist --install-location /private/tmp/coquille-pkg \
+            --scripts installer/macos/scripts \
+            --identifier com.coquille.subtitles --version "$version" \
+            out/Coquille-macOS.pkg
+          ls -lh out
+
+      # Installation réelle sur la machine de CI (sans les gros téléchargements),
+      # puis le moteur est lancé depuis l'emplacement installé.
+      - name: Essai de l'installeur
+        run: |
+          echo "console : $(stat -f%Su /dev/console) / moi : $(whoami)"
+          echo "sk-or-v1-0000000000000000000000000000ci" > /private/tmp/coquille-setup-key
+          touch /private/tmp/coquille-nodownloads
+          sudo installer -pkg out/Coquille-macOS.pkg -target / || { sudo tail -60 /var/log/install.log; exit 1; }
+          cat /private/tmp/coquille-install.log
+          app="$HOME/Library/Application Support/Coquille"
+          panel="$HOME/Library/Application Support/Adobe/CEP/extensions/com.coquille.subtitles"
+          for f in "$app/python/bin/python3" "$app/backend/coquille/app.py" "$panel/CSXS/manifest.xml" "$panel/js/config.local.js"; do
+            test -e "$f" || { echo "::error::absent après installation : $f"; exit 1; }
+          done
+          cat "$panel/js/config.local.js"
+          grep -qE '^OPENROUTER_API_KEY=sk-or-v1-0+ci$' "$app/backend/.env" || { echo "::error::clé non écrite dans .env"; exit 1; }
+          test "$(stat -f%Su "$app/backend/.env")" = "$(whoami)" || { echo "::error::.env n'appartient pas à l'utilisateur"; exit 1; }
+          test "$(defaults read com.adobe.CSXS.12 PlayerDebugMode)" = "1"
+          test ! -e /private/tmp/coquille-setup-key
+          cd "$app/backend"
+          "$app/python/bin/python3" -m coquille.serve --port 8765 --log "$RUNNER_TEMP/backend.log" &
+          pid=$!
+          for i in $(seq 1 60); do sleep 1; curl -fs http://127.0.0.1:8765/llm > llm.json && break; done
+          cat "$RUNNER_TEMP/backend.log"; cat llm.json; echo
+          grep -q '"configured":true' llm.json
+          kill $pid
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Coquille-macOS
+          path: out/Coquille-macOS.pkg
+          compression-level: 0
+
   publier:
     if: github.event_name == 'release'
-    needs: [windows]
+    needs: [windows, macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Joindre l'installeur à la release
+      - name: Joindre les installeurs à la release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

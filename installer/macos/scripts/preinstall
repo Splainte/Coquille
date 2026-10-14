@@ -1,0 +1,7 @@
+#!/bin/bash
+# Coquille-macOS.pkg — avant la copie des fichiers (lancé en root par Installer).
+# Un moteur Coquille encore lancé tiendrait l'ancien code en mémoire : on l'arrête.
+pkill -f 'coquille\.(app|serve)' 2>/dev/null || true
+# Payload d'une installation précédente interrompue.
+rm -rf /private/tmp/coquille-pkg
+exit 0

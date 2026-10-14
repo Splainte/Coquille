@@ -1,0 +1,159 @@
+#!/bin/bash
+# Coquille-macOS.pkg — après la copie des fichiers (lancé en root par Installer).
+#
+# Le paquet dépose son contenu dans /private/tmp/coquille-pkg (le payload) :
+#   app/python   Python autonome + dépendances du backend (faster-whisper…)
+#   app/backend  code du backend
+#   panel        panneau CEP
+# Ce script l'installe pour la personne connectée, comme l'installeur Windows :
+#   ~/Library/Application Support/Coquille                       (moteur)
+#   ~/Library/Application Support/Adobe/CEP/extensions/com.coquille.subtitles
+# puis demande la clé OpenRouter (facultative) et télécharge le recalage du
+# timing (PyTorch) et les modèles, sans rien demander d'autre.
+#
+# CI / déploiement : /private/tmp/coquille-setup-key (clé, enregistrée sans
+# question ni vérification) et /private/tmp/coquille-nodownloads (saute les
+# gros téléchargements) sont lus puis effacés.
+set -u
+
+STAGE="/private/tmp/coquille-pkg"
+KEY_FILE="/private/tmp/coquille-setup-key"
+NODL_FILE="/private/tmp/coquille-nodownloads"
+TITLE="Coquille — Clé API OpenRouter"
+
+# Fenêtre de saisie de la clé ($1 = message). Sortie : texte saisi, vide si
+# « Passer » ou sans réponse au bout de 15 min.
+dialog_script() {
+  printf '%s\n' \
+    "set r to display dialog \"$1\" default answer \"\" with title \"$TITLE\" with icon note with hidden answer buttons {\"Passer\", \"Enregistrer\"} default button \"Enregistrer\" cancel button \"Passer\" giving up after 900" \
+    'if gave up of r then return ""' \
+    'return text returned of r'
+}
+
+# CI : vérifie seulement que l'AppleScript de la fenêtre compile.
+if [ "${COQUILLE_COMPILE_DIALOG:-}" = "1" ]; then
+  dialog_script "essai" | osacompile -o /private/tmp/coquille-dialog.scpt - && echo "fenêtre de clé : OK"
+  exit $?
+fi
+
+LOG="/private/tmp/coquille-install.log"
+exec > >(tee "$LOG") 2>&1
+echo "Coquille : installation ($(date))"
+
+USER_NAME="$(stat -f%Su /dev/console)"
+if [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ] || [ "$USER_NAME" = "loginwindow" ]; then
+  echo "Aucune session ouverte : Coquille s'installe pour la personne connectée." >&2
+  exit 1
+fi
+USER_UID="$(id -u "$USER_NAME")"
+USER_HOME="$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory | awk '{print $2}')"
+APP="$USER_HOME/Library/Application Support/Coquille"
+PANEL="$USER_HOME/Library/Application Support/Adobe/CEP/extensions/com.coquille.subtitles"
+PY="$APP/python/bin/python3"
+as_user() { sudo -u "$USER_NAME" -H "$@"; }
+
+# --- Fichiers --------------------------------------------------------------------
+# Ancienne installation par setup-mac.sh : lien vers le dépôt. On retire le lien
+# seul (sinon la copie écrirait dans le dépôt).
+[ -L "$PANEL" ] && rm "$PANEL"
+as_user mkdir -p "$APP" "$PANEL"
+# Python : on garde les paquets ajoutés pendant l'installation (PyTorch).
+rsync -a "$STAGE/app/python/" "$APP/python/"
+# Code du backend et panneau : repartent propres ; .env (clé) n'est jamais livré
+# donc jamais écrasé.
+mkdir -p "$APP/backend/coquille"
+rsync -a --delete "$STAGE/app/backend/coquille/" "$APP/backend/coquille/"
+rsync -a --exclude /coquille "$STAGE/app/backend/" "$APP/backend/"
+rsync -a --delete "$STAGE/panel/" "$PANEL/"
+rm -rf "$STAGE"
+
+# Le panneau lance lui-même le moteur avec ce Python.
+js() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+cat > "$PANEL/js/config.local.js" <<EOF
+// Généré par l'installeur Coquille : le panneau lance lui-même le moteur.
+window.COQUILLE = {
+  backendPython: "$(js "$PY")",
+  backendDir: "$(js "$APP/backend")",
+  backendLog: "$(js "$APP/backend.log")"
+};
+EOF
+chown -R "$USER_NAME":staff "$APP" "$PANEL"
+
+# Panneaux CEP non signés : PlayerDebugMode, dans les préférences de la personne.
+for V in 9 10 11 12 13; do
+  as_user defaults write "com.adobe.CSXS.$V" PlayerDebugMode 1 || true
+done
+echo "Panneau et moteur installés pour $USER_NAME."
+
+# --- Clé OpenRouter ----------------------------------------------------------------
+clean_key() {
+  local k="$1"
+  k="${k//\"/}"; k="${k//\'/}"
+  k="$(printf '%s' "$k" | tr -d '[:space:]')"
+  k="${k#OPENROUTER_API_KEY=}"; k="${k#Bearer}"
+  printf '%s' "$k"
+}
+looks_like_key() { [[ "$1" =~ ^[A-Za-z0-9_-]{20,200}$ ]]; }
+# Code HTTP d'OpenRouter pour cette clé (GET /key, gratuit) ; 000 = injoignable.
+# L'en-tête passe par un fichier : la clé n'apparaît pas dans la liste des processus.
+check_key() {
+  local h; h="$(mktemp)"; chmod 600 "$h"
+  printf 'Authorization: Bearer %s\n' "$1" > "$h"
+  curl -s -o /dev/null -w '%{http_code}' -m 15 -H @"$h" https://openrouter.ai/api/v1/key || true
+  rm -f "$h"
+}
+ask_key() {
+  local f; f="$(mktemp /private/tmp/coquille-dialog.XXXXXX)"
+  dialog_script "$1" > "$f"; chmod 644 "$f"
+  launchctl asuser "$USER_UID" sudo -u "$USER_NAME" osascript "$f" 2>/dev/null
+  rm -f "$f"
+}
+
+KEY=""
+if [ -f "$KEY_FILE" ]; then
+  KEY="$(clean_key "$(cat "$KEY_FILE")")"
+  rm -f "$KEY_FILE"
+  looks_like_key "$KEY" || { echo "Clé fournie ignorée : format invalide."; KEY=""; }
+elif grep -qE '^OPENROUTER_API_KEY=.+' "$APP/backend/.env" 2>/dev/null; then
+  echo "Clé OpenRouter déjà enregistrée : conservée."
+else
+  MSG="Coquille peut corriger les sous-titres par IA (noms de marques, jargon, homophones) grâce à OpenRouter.\n\nCollez votre clé (sk-or-v1-…) ou cliquez « Passer » : vous pourrez l’ajouter plus tard depuis le panneau (bouton « Ajouter la clé »).\n\nCréer une clé : openrouter.ai/settings/keys"
+  for _ in 1 2 3 4 5; do
+    K="$(clean_key "$(ask_key "$MSG")")"
+    [ -z "$K" ] && break  # étape passée
+    if ! looks_like_key "$K"; then
+      MSG="Ce texte ne ressemble pas à une clé OpenRouter (elle commence par sk-or-v1-).\n\nCorrigez-la, ou cliquez « Passer »."
+      continue
+    fi
+    CODE="$(check_key "$K")"
+    case "$CODE" in
+      200) KEY="$K"; break ;;
+      401|403) MSG="OpenRouter refuse cette clé. Vérifiez-la (copiez-la en entier), ou cliquez « Passer »." ;;
+      *) echo "OpenRouter injoignable (HTTP $CODE) : clé enregistrée sans vérification."; KEY="$K"; break ;;
+    esac
+  done
+fi
+if [ -n "$KEY" ]; then
+  # Passée par l'environnement, jamais en argument (liste des processus).
+  (cd "$APP/backend" && COQUILLE_SETUP_KEY="$KEY" PYTHONDONTWRITEBYTECODE=1 "$PY" -m coquille.llm_key)
+  chown "$USER_NAME":staff "$APP/backend/.env" 2>/dev/null
+fi
+KEY=""
+
+# --- Téléchargements (recalage du timing, modèles) ---------------------------------
+if [ -f "$NODL_FILE" ]; then
+  rm -f "$NODL_FILE"
+  echo "Téléchargements sautés (demande explicite)."
+else
+  echo "Recalage du timing : PyTorch…"
+  (cd "$APP/backend" && as_user "$PY" -m pip install --no-warn-script-location \
+      --disable-pip-version-check -r requirements-align.txt) \
+    || echo "Recalage du timing non installé : Coquille utilisera le timing de Whisper."
+  echo "Téléchargement des modèles…"
+  (cd "$APP/backend" && as_user "$PY" -m coquille.prefetch) \
+    || echo "Un modèle n'a pas pu être téléchargé : il le sera au premier sous-titrage."
+fi
+
+cp "$LOG" "$APP/install.log" 2>/dev/null && chown "$USER_NAME":staff "$APP/install.log"
+echo "Coquille installé. Redémarrez Premiere Pro puis ouvrez Fenêtre > Extensions > Coquille — Sous-titres."
+exit 0
