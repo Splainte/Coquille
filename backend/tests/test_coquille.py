@@ -713,7 +713,7 @@ class TestLlmKey(unittest.TestCase):
 
     def test_endpoint_saves_and_never_returns_key(self):
         k = "sk-or-v1-" + "f" * 64
-        ok = {"state": "ok", "detail": "clé valide", "label": "Vic", "limit_remaining": None}
+        ok = {"state": "ok", "detail": "clé valide", "label": "Monteur", "limit_remaining": None}
         with mock.patch.object(self.llm_key, "verify", return_value=ok):
             r = self._client().post("/llm/key", json={"key": k}, headers={"Origin": "null"})
         self.assertEqual(r.status_code, 200)
