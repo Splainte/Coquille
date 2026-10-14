@@ -5,4 +5,4 @@ Premiere → correction LLM contextuelle (OpenRouter) → segmentation/équilibr
 des lignes → export SRT.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

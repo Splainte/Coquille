@@ -57,7 +57,15 @@ Décisions de conception et état de l'API Premiere : voir
   installeur (clé et paquets conservés).
   Installation silencieuse : `Coquille-Setup.exe /VERYSILENT /KEY=sk-or-v1-…`.
 - **Windows (développement)** : `setup-windows.bat` (droits admin demandés), puis `run-backend.bat`.
-- **macOS** : `bash setup-mac.sh`, puis `bash run-backend.sh`.
+- **macOS Apple Silicon (monteurs)** : télécharger `Coquille-macOS.pkg` dans la dernière release
+  et l'ouvrir. Le paquet n'est pas signé par Apple : au premier lancement, macOS le bloque →
+  Réglages Système ▸ Confidentialité et sécurité ▸ « Ouvrir quand même » (ou clic droit ▸
+  Ouvrir). Il installe tout pour la personne connectée (`~/Library/Application Support/Coquille`
+  + panneau CEP), demande la clé OpenRouter dans une fenêtre (bouton « Passer »), puis télécharge
+  le recalage du timing et les modèles. Transcription sur le processeur (modèle `small` en Auto).
+  Mac Intel : non pris en charge (PyTorch n'y existe plus). Déploiement sans question :
+  `echo sk-or-v1-… > /private/tmp/coquille-setup-key` avant `sudo installer -pkg Coquille-macOS.pkg -target /`.
+- **macOS (développement)** : `bash setup-mac.sh`, puis `bash run-backend.sh`.
 - Clé OpenRouter : bouton **Ajouter la clé** en haut du panneau (ou menu ≡ du panneau ▸
   *Clé OpenRouter…*). Elle est vérifiée auprès d'OpenRouter puis écrite dans `backend/.env`,
   effet immédiat. Une pastille indique l'état : verte = correction IA active, grise = pas de
