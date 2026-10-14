@@ -793,6 +793,23 @@ class TestZoneEtProgression(unittest.TestCase):
         app_mod._done("job1")
         self.assertEqual(TestClient(app_mod.app).get("/progress/job1").json()["phase"], "inconnu")
 
+    def test_cancel_interrupts_transcription(self):
+        from fastapi.testclient import TestClient
+        from coquille import app as app_mod
+        client = TestClient(app_mod.app)
+
+        def fake_transcribe(path, progress, **kw):
+            # Le panneau annule pendant que Whisper produit ses segments.
+            client.post("/cancel/job2")
+            progress("transcription", 0.3)
+            return [Word(text="jamais", start=0.0, duration=0.2)]
+
+        with mock.patch.object(app_mod, "transcribe_audio", side_effect=fake_transcribe):
+            r = client.post("/transcribe", json={"audio_path": "x.wav", "job_id": "job2"})
+        self.assertEqual(r.status_code, 409)
+        self.assertNotIn("job2", app_mod._CANCELLED)       # oublié une fois la tâche finie
+        self.assertEqual(client.get("/progress/job2").json()["phase"], "inconnu")
+
 
 if __name__ == "__main__":
     unittest.main()

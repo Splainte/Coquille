@@ -206,6 +206,10 @@ _MODELS: dict[tuple[str, str, str], object] = {}
 Progress = Callable[[str, Optional[float]], None]
 
 
+class Cancelled(Exception):
+    """Levée par le rappel de progression quand le panneau annule la tâche."""
+
+
 def _noop_progress(phase: str, fraction: float | None) -> None:
     pass
 
@@ -390,6 +394,8 @@ def refine_word_timing(
         return words, "non installé"
     try:
         return forced_align.refine(words, audio_path, language, progress), "aligné"
+    except Cancelled:
+        raise
     except Exception as exc:  # pragma: no cover - dépend de l'environnement
         import logging
 

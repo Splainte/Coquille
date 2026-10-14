@@ -53,6 +53,12 @@ PY="$APP/python/bin/python3"
 as_user() { sudo -u "$USER_NAME" -H "$@"; }
 
 # --- Fichiers --------------------------------------------------------------------
+# Mise à jour : le moteur qui tourne garderait l'ancien code → on l'arrête, le
+# panneau le relance. Les réglages posés à la main dans config.local.js (moteur
+# sur une autre machine ou un autre port) sont gardés.
+pkill -u "$USER_NAME" -f 'coquille\.(app|serve)' 2>/dev/null || true
+KEPT="$(grep -E '^[[:space:]]*(backendUrl|remoteBackend):' "$PANEL/js/config.local.js" 2>/dev/null \
+  | sed -E 's/^[[:space:]]*/  /; s/,?[[:space:]]*$/,/')"
 # Ancienne installation par setup-mac.sh : lien vers le dépôt. On retire le lien
 # seul (sinon la copie écrirait dans le dépôt).
 [ -L "$PANEL" ] && rm "$PANEL"
@@ -71,7 +77,8 @@ rm -rf "$STAGE"
 js() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 cat > "$PANEL/js/config.local.js" <<EOF
 // Généré par l'installeur Coquille : le panneau lance lui-même le moteur.
-window.COQUILLE = {
+window.COQUILLE = {${KEPT:+
+$KEPT}
   backendPython: "$(js "$PY")",
   backendDir: "$(js "$APP/backend")",
   backendLog: "$(js "$APP/backend.log")"

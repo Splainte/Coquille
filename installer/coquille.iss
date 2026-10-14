@@ -79,6 +79,7 @@ var
   KeyPage: TInputQueryWizardPage;
   KeyNote: TNewStaticText;
   KeyValue: String;
+  KeptConfig: TArrayOfString;
 
 function SetEnvironmentVariable(lpName, lpValue: String): BOOL;
   external 'SetEnvironmentVariableW@kernel32.dll stdcall';
@@ -244,11 +245,33 @@ begin
       SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
+// Réglages posés à la main dans config.local.js (moteur sur un autre port ou
+// une autre machine) : relus avant que le panneau soit effacé, puis réécrits.
+procedure KeepUserConfig;
+var
+  Lines: TArrayOfString;
+  I, N: Integer;
+  L: String;
+begin
+  SetArrayLength(KeptConfig, 0);
+  if not LoadStringsFromFile(ExpandConstant('{#PanelDir}\js\config.local.js'), Lines) then Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do begin
+    L := Trim(Lines[I]);
+    if (Pos('backendUrl:', L) = 1) or (Pos('remoteBackend:', L) = 1) then begin
+      if Copy(L, Length(L), 1) = ',' then L := Copy(L, 1, Length(L) - 1);
+      N := GetArrayLength(KeptConfig);
+      SetArrayLength(KeptConfig, N + 1);
+      KeptConfig[N] := '  ' + L + ',';
+    end;
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
 begin
   Result := '';
+  KeepUserConfig;
   // Un backend lancé verrouille les fichiers de Python : on l'arrête.
   ExtractTemporaryFile('stop-backend.ps1');
   StopBackend;
@@ -293,15 +316,18 @@ end;
 procedure WritePanelConfig;
 var
   Lines: TArrayOfString;
+  I, K: Integer;
 begin
-  SetArrayLength(Lines, 7);
+  K := GetArrayLength(KeptConfig);
+  SetArrayLength(Lines, 7 + K);
   Lines[0] := '// Généré par l''installeur Coquille : le panneau lance lui-même le moteur.';
   Lines[1] := 'window.COQUILLE = {';
-  Lines[2] := '  backendPython: "' + JsPath(ExpandConstant('{app}\python\pythonw.exe')) + '",';
-  Lines[3] := '  backendDir: "' + JsPath(ExpandConstant('{app}\backend')) + '",';
-  Lines[4] := '  backendLog: "' + JsPath(ExpandConstant('{app}\backend.log')) + '"';
-  Lines[5] := '};';
-  Lines[6] := '';
+  for I := 0 to K - 1 do Lines[2 + I] := KeptConfig[I];
+  Lines[2 + K] := '  backendPython: "' + JsPath(ExpandConstant('{app}\python\pythonw.exe')) + '",';
+  Lines[3 + K] := '  backendDir: "' + JsPath(ExpandConstant('{app}\backend')) + '",';
+  Lines[4 + K] := '  backendLog: "' + JsPath(ExpandConstant('{app}\backend.log')) + '"';
+  Lines[5 + K] := '};';
+  Lines[6 + K] := '';
   SaveStringsToUTF8File(ExpandConstant('{#PanelDir}\js\config.local.js'), Lines, False);
 end;
 

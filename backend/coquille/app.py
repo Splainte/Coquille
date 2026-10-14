@@ -7,6 +7,7 @@ Endpoints :
 - POST /process                pipeline complet → SRT + cues
 - POST /transcribe             (re)transcription WhisperX d'un fichier audio
 - GET  /progress/{job}         avancement d'une transcription (job_id du panneau)
+- POST /cancel/{job}           annule une transcription en cours (bouton « Recommencer »)
 - GET  /llm                    état de la clé OpenRouter (?check=1 : la vérifie)
 - POST /llm/key                enregistre la clé OpenRouter (backend/.env)
 - DELETE /llm/key              retire la clé OpenRouter
@@ -40,13 +41,14 @@ from .segment import segment
 from .serialize import cue_to_dict, word_from_dict, word_to_dict
 from .srt import to_srt
 from .transcribe import (
+    Cancelled,
     list_engines,
     load_premiere_transcript,
     refine_word_timing,
     transcribe_audio,
 )
 
-app = FastAPI(title="Coquille", version="0.4.0")
+app = FastAPI(title="Coquille", version="0.5.0")
 
 # Le panneau CEP s'exécute dans CEF depuis une origine "file://" (= "null").
 # Outil local uniquement (127.0.0.1) → on autorise toutes les origines.
@@ -100,6 +102,10 @@ class TranscribeRequest(BaseModel):
 # la réponse (les routes synchrones tournent dans un pool de threads).
 _PROGRESS: dict[str, dict] = {}
 _PROGRESS_LOCK = threading.Lock()
+# Tâches annulées par le panneau : le prochain rappel de progression lève
+# Cancelled, ce qui interrompt Whisper (segments produits au fil de l'eau) ou
+# l'alignement entre deux morceaux.
+_CANCELLED: set[str] = set()
 
 
 def _tracker(job_id: Optional[str]):
@@ -109,6 +115,8 @@ def _tracker(job_id: Optional[str]):
 
     def report(phase: str, fraction: Optional[float]) -> None:
         with _PROGRESS_LOCK:
+            if phase != "démarrage" and job_id in _CANCELLED:
+                raise Cancelled()
             prev = _PROGRESS.get(job_id) or {}
             started = prev.get("phase_started") if prev.get("phase") == phase else time.monotonic()
             _PROGRESS[job_id] = {
@@ -124,6 +132,7 @@ def _done(job_id: Optional[str]) -> None:
     if job_id:
         with _PROGRESS_LOCK:
             _PROGRESS.pop(job_id, None)
+            _CANCELLED.discard(job_id)
 
 
 @app.get("/presets")
@@ -298,6 +307,15 @@ def get_progress(job_id: str) -> dict:
     return p
 
 
+@app.post("/cancel/{job_id}")
+def post_cancel(job_id: str) -> dict:
+    """Annule une transcription en cours (ou sur le point de démarrer)."""
+    with _PROGRESS_LOCK:
+        running = job_id in _PROGRESS
+        _CANCELLED.add(job_id)
+    return {"cancelled": True, "running": running}
+
+
 @app.post("/transcribe")
 def post_transcribe(req: TranscribeRequest) -> dict:
     """Transcrit un fichier déjà présent sur la machine du backend (chemin local)."""
@@ -315,6 +333,8 @@ def post_transcribe(req: TranscribeRequest) -> dict:
             progress=report,
         )
         words, timing = refine_word_timing(words, req.audio_path, req.language, report)
+    except Cancelled:
+        raise HTTPException(status_code=409, detail="transcription annulée")
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
@@ -343,6 +363,8 @@ async def post_transcribe_upload(
             refine_timing=False, start=start, end=end, progress=report,
         )
         words, timing = refine_word_timing(words, tmp_path, language, report)
+    except Cancelled:
+        raise HTTPException(status_code=409, detail="transcription annulée")
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
