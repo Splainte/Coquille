@@ -129,11 +129,23 @@ jobs:
           if (-not (Select-String -Path "$app\backend\.env" -Pattern '^OPENROUTER_API_KEY=sk-or-v1-0+ci$' -Quiet)) { Write-Error "clé non écrite dans .env" }
           (Get-ItemProperty HKCU:\Software\Adobe\CSXS.12).PlayerDebugMode
 
+      - name: Joindre l'installeur à la release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" installer/Output/Coquille-Setup.exe --clobber
+
+      # PR : à télécharger depuis l'onglet Actions pour essayer. Facultatif : un
+      # quota d'artefacts plein (partagé entre tous les dépôts) ne fait pas échouer.
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'release'
+        continue-on-error: true
         with:
           name: Coquille-Windows
           path: installer/Output/Coquille-Setup.exe
           compression-level: 0
+          retention-days: 5
 
   # Apple Silicon seulement : PyTorch (recalage du timing) n'existe plus pour
   # les Mac Intel depuis la 2.2.
@@ -218,24 +230,17 @@ jobs:
           grep -q '"configured":true' llm.json
           kill $pid
 
+      - name: Joindre l'installeur à la release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" out/Coquille-macOS.pkg --clobber
+
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'release'
+        continue-on-error: true
         with:
           name: Coquille-macOS
           path: out/Coquille-macOS.pkg
           compression-level: 0
-
-  publier:
-    if: github.event_name == 'release'
-    needs: [windows, macos]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Joindre les installeurs à la release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ github.event.release.tag_name }}" dist/* \
-            --repo "${{ github.repository }}" --clobber
+          retention-days: 5
