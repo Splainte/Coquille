@@ -26,6 +26,12 @@ var setStatus = function (msg) { $("status").textContent = msg; };
 var setBusy = function (on) { $("spinner").classList.toggle("hidden", !on); };
 var lastResult = null;
 
+// Génération en cours : `run` change à chaque génération et à chaque
+// « Recommencer » → une étape qui se termine pour une génération périmée est
+// ignorée. jobId sert à annuler la transcription côté moteur (/cancel).
+var current = { run: 0, busy: false, jobId: null, wav: "", stopWatch: null };
+function Superseded() { this.message = "génération abandonnée"; }
+
 // --- Nettoyage des temporaires ----------------------------------------------
 // Les WAV (rendu audio) et SRT (insertion) s'écrivent dans os.tmpdir() avec un
 // nom horodaté. On supprime le WAV dès la transcription faite, et on purge au
@@ -117,6 +123,7 @@ var backend = {
     return http("POST", "/transcribe", body);
   },
   progress: function (jobId) { return http("GET", "/progress/" + encodeURIComponent(jobId)); },
+  cancel: function (jobId) { return http("POST", "/cancel/" + encodeURIComponent(jobId)); },
   process: function (payload) { return http("POST", "/process", payload); },
   // Re-segmentation de mots déjà corrigés (après validation des suggestions).
   segment: function (payload) { return http("POST", "/segment", payload); },
@@ -197,7 +204,9 @@ function init() {
     } catch (e) {}
     sel.addEventListener("change", function () {
       try { window.localStorage.setItem("coquille.media", sel.value); } catch (e) {}
+      settingsSummary();
     });
+    settingsSummary();
     setStatus("Prêt." + (REMOTE ? " (backend distant)" : ""));
     refreshLlm(true);
     return backend.getEngines();
@@ -207,7 +216,7 @@ function init() {
       var opt = document.createElement("option");
       opt.value = e.id;
       opt.textContent = e.id === "auto"
-        ? e.label + " → " + info.auto_resolves_to + " [" + info.device + "]"
+        ? "Auto · " + info.auto_resolves_to + (info.device === "cuda" ? " (GPU)" : " (processeur)")
         : e.label;
       sel.appendChild(opt);
     });
@@ -223,16 +232,27 @@ function init() {
   if (saved) { $("maxchars").value = saved; }
   $("maxchars").addEventListener("change", function () {
     try { window.localStorage.setItem("coquille.maxchars", $("maxchars").value); } catch (e) {}
+    settingsSummary();
   });
+  $("offline").addEventListener("change", settingsSummary);
 
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
+  $("reset").addEventListener("click", onReset);
+  initUpdates();
 
   // Zone affichée à jour quand on revient sur le panneau (après avoir posé des
   // points d'entrée/sortie ou sélectionné des clips dans la timeline).
   refreshZone();
   document.body.addEventListener("mouseenter", refreshZone);
   window.addEventListener("focus", refreshZone);
+}
+
+// Résumé des réglages affiché quand la section est repliée.
+function settingsSummary() {
+  var sel = $("media"), opt = sel.options[sel.selectedIndex];
+  $("settingsSum").textContent = (opt ? opt.textContent + " · " : "") + $("maxchars").value +
+    " car." + ($("offline").checked ? " · hors-ligne" : "");
 }
 
 // --- Clé OpenRouter : indicateur + menu de saisie ----------------------------
@@ -364,9 +384,9 @@ function zoneLabel(z) {
 }
 
 function refreshZone() {
-  if (!window.__adobe_cep__) { $("zone").textContent = "Zone : toute la séquence"; return; }
-  getZone().then(function (z) { $("zone").textContent = zoneLabel(z); })
-    .catch(function (e) { $("zone").textContent = "Zone : " + e.message; });
+  if (!window.__adobe_cep__) { $("zoneText").textContent = "Zone : toute la séquence"; return; }
+  getZone().then(function (z) { $("zoneText").textContent = zoneLabel(z); })
+    .catch(function (e) { $("zoneText").textContent = "Zone : " + e.message; });
 }
 
 // --- Barre d'avancement de la transcription ---------------------------------
@@ -408,10 +428,21 @@ function watchProgress(jobId, prefix) {
 }
 
 // --- Flux génération --------------------------------------------------------
+function setRunning(on) {
+  current.busy = on;
+  $("generate").disabled = on;
+}
+
 function onGenerate() {
+  if (current.busy) return;
+  var my = ++current.run;
+  // Lève Superseded si « Recommencer » (ou une autre génération) est passé par là.
+  var alive = function (v) { if (my !== current.run) throw new Superseded(); return v; };
+  setRunning(true);
   $("insert").disabled = true;
   lastResult = null;
   $("corrections").innerHTML = "";
+  renderCues([]);
   var media = $("media").value;
   var engine = $("engine").value || "auto";
   var offline = $("offline").checked;
@@ -426,8 +457,9 @@ function onGenerate() {
     var os = require("os"); var pathmod = require("path");
     tmpWav = pathmod.join(os.tmpdir(), "coquille-" + Date.now() + ".wav");
   } catch (e) {
-    setBusy(false); setStatus("Node indisponible : " + e.message); return;
+    setBusy(false); setRunning(false); setStatus("Node indisponible : " + e.message); return;
   }
+  current.wav = tmpWav;
 
   // Zone : entrée/sortie → seul ce morceau est rendu (rendu 1 = in→out) puis les
   // temps sont décalés ; clips sélectionnés → rendu complet, transcription de la
@@ -435,22 +467,28 @@ function onGenerate() {
   var zone = { mode: "all", start: 0, end: 0 };
   getZone().catch(function () { return zone; })
     .then(function (z) {
+      alive();
       zone = z;
-      $("zone").textContent = zoneLabel(z);
+      $("zoneText").textContent = zoneLabel(z);
       setStatus("Rendu audio " + (z.mode === "inout" ? "de la zone" : "de la séquence") + "…");
       return evalScript("coquilleExportAudio(" + jsStr(tmpWav) + "," + jsStr(AUDIO_PRESET_PATH) +
         "," + (z.mode === "inout" ? 1 : 0) + ")");
     })
     .then(function (res) {
       var wav = res.indexOf("OK:") === 0 ? res.slice(3) : tmpWav;
+      current.wav = wav;
+      if (my !== current.run) { rmFile(wav); throw new Superseded(); }
       var jobId = "job-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
+      current.jobId = jobId;
       setStatus("Transcription (" + engine + ")…");
       showProgress(null);
       var stop = watchProgress(jobId, "");
+      current.stopWatch = stop;
       var clip = zone.mode === "selection" ? { start: zone.start, end: zone.end } : null;
       return backend.transcribe(wav, engine, clip, jobId).then(function (r) {
         stop();
         rmFile(wav);  // WAV inutile une fois transcrit
+        alive();
         timingInfo = r.timing || "";
         var shift = zone.mode === "inout" ? zone.start : 0;
         return (r.words || []).map(function (w) {
@@ -460,6 +498,7 @@ function onGenerate() {
       }, function (e) { stop(); throw e; });
     })
     .then(function (whisperWords) {
+      current.jobId = null;
       if (!whisperWords || !whisperWords.length) {
         // Musique seule / silence : rien à sous-titrer (ce n'est pas une erreur).
         var info = new Error("Aucune parole détectée dans " +
@@ -475,7 +514,9 @@ function onGenerate() {
       });
     })
     .then(function (result) {
+      alive();
       setBusy(false);
+      setRunning(false);
       lastResult = result;  // srt = version glossaire (aucune suggestion appliquée)
       // Mémorise la base pour la revue : mots après glossaire + suggestions.
       review = {
@@ -484,6 +525,8 @@ function onGenerate() {
       };
       renderCorrections(result.correction);
       renderCues(result.cues);
+      $("settingsSec").open = false;
+      $("generate").textContent = "Générer à nouveau";
       if (result.correction && result.correction.error) { refreshLlm(true); }
       setStatus(
         result.cues.length + " sous-titres générés. " +
@@ -495,9 +538,38 @@ function onGenerate() {
       $("insert").disabled = false;
     })
     .catch(function (e) {
+      if (e instanceof Superseded || my !== current.run) return;  // déjà remis à zéro
+      current.jobId = null;
       setBusy(false);
+      setRunning(false);
       setStatus((e.isInfo ? "" : "Erreur : ") + e.message);
     });
+}
+
+// --- Recommencer -------------------------------------------------------------
+// Efface tout ce qui a été produit (sous-titres, corrections, suggestions) et
+// annule une génération en cours : la transcription s'arrête côté moteur, les
+// étapes encore en vol (rendu audio, correction IA) sont ignorées à leur retour.
+// Les réglages (média, moteur, caractères par ligne) sont conservés.
+function onReset() {
+  var wasBusy = current.busy;
+  current.run++;
+  if (current.jobId) { backend.cancel(current.jobId).catch(function () {}); }
+  if (current.stopWatch) { current.stopWatch(); }
+  if (current.wav) { rmFile(current.wav); }
+  current.jobId = null; current.stopWatch = null; current.wav = "";
+  setRunning(false);
+  setBusy(false);
+  hideProgress();
+  lastResult = null;
+  review = { media: null, maxChars: null, words: [], accepted: {} };
+  $("corrections").innerHTML = "";
+  renderCues([]);
+  $("settingsSec").open = true;
+  $("generate").textContent = "Générer les sous-titres";
+  $("insert").disabled = true;
+  setStatus(wasBusy ? "Génération annulée." : "Prêt.");
+  refreshZone();
 }
 
 // Applique au tableau de mots de base les suggestions cochées, puis re-segmente
@@ -509,11 +581,13 @@ function applyReview() {
     return { de: sg.index, a: sg.end_index, texte: sg.suggested };
   });
 
+  var my = current.run;
   setStatus("Mise à jour des sous-titres…");
   return backend.segment({
     media: review.media, words: review.words, spans: spans,
     max_chars_per_line: review.maxChars,
   }).then(function (r) {
+    if (my !== current.run) return;  // « Recommencer » entre-temps
     if (lastResult) { lastResult.srt = r.srt; lastResult.track_style = r.track_style; }
     renderCues(r.cues);
     var n = Object.keys(review.accepted).length;
@@ -528,10 +602,10 @@ function correctionSummary(c) {
   var sugg = (c.suggestions && c.suggestions.length) || 0;
   var warn = (c.warnings && c.warnings.length) ? "⚠ " + c.warnings.join(" ") + " " : "";
   if (c.error) {
-    return "⚠ LLM indisponible (glossaire seul, " + gloss + " corr.) — " + c.error + ". ";
+    return "⚠ IA indisponible (glossaire seul, " + gloss + " corr.) — " + c.error + ". ";
   }
   if (c.used_llm) {
-    return gloss + " corr. glossaire, " + sugg + " suggestion(s) LLM à valider (" +
+    return gloss + " corr. glossaire, " + sugg + " suggestion(s) de l'IA à valider (" +
       (c.model || "?") + "). " + warn;
   }
   return gloss + " correction(s) glossaire (hors-ligne). ";
@@ -552,56 +626,72 @@ function seekTo(seconds) {
 
 // Un lien « localiser m:ss.s » qui déplace la tête de lecture.
 function locLink(start) {
-  var loc = document.createElement("span"); loc.className = "loc";
-  loc.textContent = "localiser " + fmtTc(start);
+  var loc = document.createElement("span"); loc.className = "loc tc";
+  loc.textContent = fmtTc(start);
+  loc.title = "Placer la tête de lecture sur ce mot";
   loc.addEventListener("click", function () { seekTo(start); });
   return loc;
 }
 
-// Deux sections : corrections glossaire (appliquées, lecture seule) et
-// suggestions LLM (à valider via cases à cocher). DOM en textContent.
+// Deux sections : suggestions de l'IA (à valider via cases à cocher) et
+// corrections du glossaire (appliquées, lecture seule). DOM en textContent.
 function renderCorrections(corr) {
   var box = $("corrections");
   box.innerHTML = "";
   if (!corr) return;
-  renderGlossarySection(box, corr.items || []);
   renderSuggestionSection(box, corr.suggestions || []);
+  renderGlossarySection(box, corr.items || []);
+}
+
+// Section repliable au style du panneau : titre + compteur à droite.
+function section(title, count, open) {
+  var det = document.createElement("details");
+  det.className = "sec"; det.open = !!open;
+  var sum = document.createElement("summary");
+  sum.appendChild(document.createTextNode(title));
+  var cnt = document.createElement("span"); cnt.className = "cnt"; cnt.textContent = count;
+  sum.appendChild(cnt);
+  var body = document.createElement("div"); body.className = "body";
+  det.appendChild(sum); det.appendChild(body);
+  return { det: det, body: body, cnt: cnt };
+}
+
+// « original → corrigé » (textContent : jamais de HTML venu du moteur).
+function changeSpans(parent, original, replacement, emptyLabel) {
+  var o = document.createElement("span"); o.className = "orig"; o.textContent = original;
+  var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
+  var n = document.createElement("span"); n.className = "new";
+  n.textContent = replacement === "" ? emptyLabel : replacement;
+  parent.appendChild(o); parent.appendChild(a); parent.appendChild(n);
 }
 
 function renderGlossarySection(box, items) {
   if (!items.length) return;
-  var det = document.createElement("details");
-  det.className = "corr";
-  var sum = document.createElement("summary");
-  sum.textContent = "Corrections glossaire (" + items.length + ") — appliquées";
-  det.appendChild(sum);
+  var sec = section("Glossaire", items.length + " appliquée" + (items.length > 1 ? "s" : ""), false);
   items.forEach(function (it) {
     var row = document.createElement("div"); row.className = "item";
-    var o = document.createElement("span"); o.className = "orig"; o.textContent = it.original;
-    var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
-    var n = document.createElement("span"); n.className = "new";
-    n.textContent = it.corrected === "" ? "(supprimé)" : it.corrected;
-    row.appendChild(o); row.appendChild(a); row.appendChild(n);
+    changeSpans(row, it.original, it.corrected, "(supprimé)");
     row.appendChild(locLink(it.start));
-    det.appendChild(row);
+    sec.body.appendChild(row);
   });
-  box.appendChild(det);
+  box.appendChild(sec.det);
 }
 
 function renderSuggestionSection(box, suggestions) {
   if (!suggestions.length) return;
-  var det = document.createElement("details");
-  det.className = "corr"; det.open = true;
-  var sum = document.createElement("summary");
-  sum.textContent = "Suggestions LLM (" + suggestions.length + ") — à valider";
-  det.appendChild(sum);
+  var sec = section("Suggestions de l'IA", "", true);
+  var count = function () {
+    sec.cnt.textContent = Object.keys(review.accepted).length + " / " + suggestions.length +
+      " appliquée" + (Object.keys(review.accepted).length > 1 ? "s" : "");
+  };
+  count();
 
-  // Barre d'actions groupées.
-  var bar = document.createElement("div"); bar.className = "item bulk";
-  var allBtn = document.createElement("button"); allBtn.textContent = "Tout appliquer";
-  var noneBtn = document.createElement("button"); noneBtn.textContent = "Tout ignorer";
+  // Actions groupées.
+  var bar = document.createElement("div"); bar.className = "links";
+  var allBtn = document.createElement("button"); allBtn.className = "link"; allBtn.textContent = "Tout appliquer";
+  var noneBtn = document.createElement("button"); noneBtn.className = "link"; noneBtn.textContent = "Tout ignorer";
   bar.appendChild(allBtn); bar.appendChild(noneBtn);
-  det.appendChild(bar);
+  sec.body.appendChild(bar);
 
   var boxes = [];
   suggestions.forEach(function (sg) {
@@ -610,42 +700,49 @@ function renderSuggestionSection(box, suggestions) {
     cb.addEventListener("change", function () {
       if (cb.checked) { review.accepted[sg.index] = sg; }
       else { delete review.accepted[sg.index]; }
+      count();
       applyReview();
     });
     boxes.push(cb);
-    var o = document.createElement("span"); o.className = "orig"; o.textContent = sg.original;
-    var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
-    var n = document.createElement("span"); n.className = "new";
-    n.textContent = sg.suggested === "" ? "(supprimer)" : sg.suggested;
-    var lab = document.createElement("label"); lab.className = "sugg";
-    lab.appendChild(cb); lab.appendChild(o); lab.appendChild(a); lab.appendChild(n);
+    var lab = document.createElement("label");
+    lab.appendChild(cb);
+    changeSpans(lab, sg.original, sg.suggested, "(supprimer)");
     row.appendChild(lab);
     row.appendChild(locLink(sg.start));
-    det.appendChild(row);
+    sec.body.appendChild(row);
   });
 
-  // Actions groupées : on coche/décoche tout, met à jour `accepted`, re-segmente once.
+  // On coche/décoche tout, met à jour `accepted`, puis une seule re-segmentation.
   allBtn.addEventListener("click", function () {
     suggestions.forEach(function (sg) { review.accepted[sg.index] = sg; });
     boxes.forEach(function (cb) { cb.checked = true; });
+    count();
     applyReview();
   });
   noneBtn.addEventListener("click", function () {
     review.accepted = {};
     boxes.forEach(function (cb) { cb.checked = false; });
+    count();
     applyReview();
   });
 
-  box.appendChild(det);
+  box.appendChild(sec.det);
+}
+
+function fmtTc2(s) {
+  var m = Math.floor(s / 60), sec = s - m * 60;
+  return m + ":" + (sec < 10 ? "0" : "") + sec.toFixed(2);
 }
 
 function renderCues(cues) {
   var c = $("cues"); c.innerHTML = "";
+  $("cuesSec").classList.toggle("hidden", !cues.length);
+  $("cuesCount").textContent = cues.length || "";
   cues.forEach(function (cue) {
     var div = document.createElement("div"); div.className = "cue";
     var tc = document.createElement("div"); tc.className = "tc";
-    tc.textContent = "#" + cue.index + "  " + cue.start.toFixed(2) + " → " +
-      cue.end.toFixed(2) + "  (CPS " + cue.cps + ")";
+    tc.textContent = "#" + cue.index + " · " + fmtTc2(cue.start) + " → " + fmtTc2(cue.end);
+    tc.title = cue.cps + " caractères par seconde";
     var ta = document.createElement("textarea");
     ta.rows = cue.lines.length; ta.value = cue.lines.join("\n");
     div.appendChild(tc); div.appendChild(ta); c.appendChild(div);
@@ -684,6 +781,180 @@ function insertSrt(srtText, styleName) {
 function onInsert() {
   if (!lastResult) return;
   insertSrt(lastResult.srt, lastResult.track_style);
+}
+
+// --- Mises à jour (releases GitHub) ------------------------------------------
+// Au démarrage, vérification silencieuse de la dernière release : si elle est
+// plus récente, le bouton du pied de panneau le signale. Un clic télécharge
+// l'installeur de la plateforme (Coquille-Setup.exe ou Coquille-macOS.pkg),
+// le lance, puis recharge le panneau une fois l'installation terminée. La clé
+// OpenRouter et les gros paquets déjà installés sont conservés par l'installeur.
+var REPO = "Splainte/Coquille";
+var VERSION = readVersion();
+var update = { latest: null, asset: null, page: null, running: false };
+
+// Dossier du panneau sur le disque (getSystemPath renvoie une URL file://).
+function extensionDir() {
+  var p = "";
+  try { p = decodeURI(window.__adobe_cep__.getSystemPath("extension")); }
+  catch (e) {
+    try { p = decodeURIComponent(location.pathname).replace(/\/[^\/]*$/, ""); } catch (x) { return ""; }
+  }
+  p = p.replace(/^file:\/\//, "");
+  if (process.platform === "win32") p = p.replace(/^\/([A-Za-z]:)/, "$1");
+  return p;
+}
+
+// Version = celle du manifest (une seule source, vérifiée par la CI au tag).
+function readVersion() {
+  try {
+    var xml = require("fs").readFileSync(require("path").join(extensionDir(), "CSXS", "manifest.xml"), "utf8");
+    return (/ExtensionBundleVersion="([^"]+)"/.exec(xml) || [])[1] || "";
+  } catch (e) { return ""; }
+}
+
+function newerThan(remote, local) {
+  var r = remote.split("."), l = (local || "0").split(".");
+  for (var i = 0; i < Math.max(r.length, l.length); i++) {
+    var a = parseInt(r[i] || "0", 10), b = parseInt(l[i] || "0", 10);
+    if (a !== b) return a > b;
+  }
+  return false;
+}
+
+function fetchLatest() {
+  return new Promise(function (resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "https://api.github.com/repos/" + REPO + "/releases/latest", true);
+    xhr.timeout = 15000;
+    xhr.onload = function () {
+      if (xhr.status !== 200) { reject(new Error("GitHub a répondu " + xhr.status)); return; }
+      try { resolve(JSON.parse(xhr.responseText)); } catch (e) { reject(e); }
+    };
+    xhr.onerror = xhr.ontimeout = function () { reject(new Error("pas d'accès à GitHub")); };
+    xhr.send();
+  });
+}
+
+function setUpdateButton(text, available) {
+  var b = $("updateBtn");
+  b.textContent = text;
+  b.classList.toggle("available", !!available);
+}
+
+// Mémorise la release si elle est plus récente ; renvoie true dans ce cas.
+function noteRelease(rel) {
+  var tag = String(rel.tag_name || "").replace(/^v/, "");
+  if (!tag || !newerThan(tag, VERSION)) return false;
+  var want = process.platform === "win32" ? /^Coquille-Setup\.exe$/i : /^Coquille-macOS\.pkg$/i;
+  update.latest = tag;
+  update.page = rel.html_url;
+  update.asset = (rel.assets || []).filter(function (a) { return want.test(a.name); })[0] || null;
+  setUpdateButton("Installer la mise à jour " + tag, true);
+  return true;
+}
+
+function initUpdates() {
+  $("version").textContent = VERSION ? "v" + VERSION : "";
+  $("headVersion").textContent = VERSION;
+  $("updateBtn").addEventListener("click", onUpdateClick);
+  setTimeout(function () { fetchLatest().then(noteRelease).catch(function () {}); }, 3000);
+}
+
+function onUpdateClick() {
+  if (update.running) return;
+  if (update.latest) { installUpdate(); return; }
+  setUpdateButton("Recherche…");
+  fetchLatest().then(function (rel) {
+    if (!noteRelease(rel)) {
+      setUpdateButton("Vérifier les mises à jour");
+      setStatus("Coquille est à jour" + (VERSION ? " (v" + VERSION + ")" : "") + ".");
+    }
+  }).catch(function (e) {
+    setUpdateButton("Vérifier les mises à jour");
+    setStatus("Vérification des mises à jour impossible : " + e.message + ".");
+  });
+}
+
+// Téléchargement HTTPS (redirections GitHub → stockage suivies) avec avancement.
+function download(url, dest, onProgress, cb) {
+  var https = require("https"), fs = require("fs");
+  https.get(url, { headers: { "User-Agent": "Coquille" } }, function (res) {
+    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+      res.resume();
+      download(res.headers.location, dest, onProgress, cb);
+      return;
+    }
+    if (res.statusCode !== 200) { res.resume(); cb(new Error("HTTP " + res.statusCode)); return; }
+    var total = parseInt(res.headers["content-length"], 10) || 0, got = 0;
+    var out = fs.createWriteStream(dest);
+    res.on("data", function (c) { got += c.length; if (total) onProgress(got / total); });
+    res.on("error", cb);
+    out.on("error", cb);
+    out.on("finish", function () {
+      out.close(function () {
+        cb(total && got !== total ? new Error("téléchargement incomplet") : null);
+      });
+    });
+    res.pipe(out);
+  }).on("error", cb);
+}
+
+function installUpdate() {
+  if (current.busy) { setStatus("Attendez la fin de la génération pour mettre à jour."); return; }
+  // Installation de développement (panneau lié au dépôt) : pas d'installeur ici.
+  if (!CONFIG.backendPython) {
+    setStatus("Version " + update.latest + " disponible. Installation de développement : " +
+      "mettez à jour le dépôt (git pull) ou installez la release.");
+    openUrl(update.page);
+    return;
+  }
+  if (!update.asset) {
+    setStatus("La version " + update.latest + " n'a pas encore d'installeur pour cette machine.");
+    openUrl(update.page);
+    return;
+  }
+  var os = require("os"), pathmod = require("path"), cp = require("child_process");
+  var dest = pathmod.join(os.tmpdir(), update.asset.name);
+  update.running = true;
+  $("updateBtn").disabled = true;
+  setUpdateButton("Téléchargement…", true);
+  showProgress(0);
+  download(update.asset.browser_download_url, dest, function (f) {
+    showProgress(f);
+    setStatus("Téléchargement de la mise à jour " + update.latest + " : " + Math.round(f * 100) + " %");
+  }, function (err) {
+    hideProgress();
+    if (err) { return updateFailed("téléchargement : " + err.message); }
+    setUpdateButton("Installation…", true);
+    setStatus("Installation de la mise à jour " + update.latest + "… Le moteur redémarrera tout seul.");
+    var child;
+    try {
+      if (process.platform === "win32") {
+        // Lancer l'.exe directement donne « spawn UNKNOWN » sous CEP : passer
+        // par cmd. /SILENT = fenêtre de progression seule, aucune question.
+        child = cp.spawn("cmd.exe", ["/c", "start", '""', "/wait", '"' + dest + '"', "/SILENT", "/SUPPRESSMSGBOXES"],
+          { windowsHide: true, windowsVerbatimArguments: true });
+      } else {
+        // Ouvre le programme d'installation de macOS ; attend sa fermeture.
+        child = cp.spawn("/usr/bin/open", ["-W", dest]);
+      }
+    } catch (e) { return updateFailed(e.message); }
+    child.on("error", function (e) { updateFailed(e.message); });
+    child.on("exit", function (code) {
+      rmFile(dest);
+      if (code !== 0) { return updateFailed("l'installeur s'est arrêté (code " + code + ")"); }
+      setStatus("Mise à jour " + update.latest + " installée : rechargement du panneau…");
+      setTimeout(function () { location.reload(); }, 1500);
+    });
+  });
+}
+
+function updateFailed(msg) {
+  update.running = false;
+  $("updateBtn").disabled = false;
+  setUpdateButton("Installer la mise à jour " + update.latest, true);
+  setStatus("Mise à jour impossible (" + msg + "). Téléchargez-la depuis la page des releases.");
 }
 
 init();
