@@ -8,11 +8,11 @@
   Le backend Python reste agnostique du runtime → re-port UXP futur peu coûteux.
 -->
 <ExtensionManifest Version="7.0" ExtensionBundleId="com.coquille.subtitles"
-    ExtensionBundleVersion="0.4.0"
+    ExtensionBundleVersion="0.5.0"
     ExtensionBundleName="Coquille"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="com.coquille.subtitles.panel" Version="0.4.0" />
+    <Extension Id="com.coquille.subtitles.panel" Version="0.5.0" />
   </ExtensionList>
 
   <ExecutionEnvironment>
@@ -44,7 +44,7 @@
         </Lifecycle>
         <UI>
           <Type>Panel</Type>
-          <Menu>Coquille — Sous-titres</Menu>
+          <Menu>Coquille</Menu>
           <Geometry>
             <Size><Width>320</Width><Height>480</Height></Size>
             <MinSize><Width>280</Width><Height>360</Height></MinSize>

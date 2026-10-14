@@ -1,69 +1,25 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
   <head>
     <meta charset="utf-8" />
     <style>
-      body { font-family: "Adobe Clean", "Segoe UI", sans-serif; margin: 0; padding: 12px; color: #e8e8e8; background: #1d1d1d; }
-      h1 { font-size: 14px; margin: 0 0 12px; }
-      .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-      select, button { font-size: 12px; padding: 6px 8px; background: #333; color: #eee; border: 1px solid #555; border-radius: 3px; }
-      button { cursor: pointer; }
-      button:disabled { opacity: 0.5; cursor: default; }
-      #statusRow { display: flex; align-items: center; gap: 8px; margin: 8px 0; min-height: 16px; }
-      #status { font-size: 11px; color: #9aa; white-space: pre-wrap; }
-      #cues { font-size: 11px; max-height: 300px; overflow: auto; border-top: 1px solid #444; padding-top: 8px; }
-      .cue { padding: 6px 0; border-bottom: 1px solid #333; }
-      .cue .tc { color: #7ab; }
-      .cue textarea { width: 100%; box-sizing: border-box; background: #2a2a2a; color: #eee; border: 1px solid #444; font-size: 13px; }
-
-      /* Section repliable des corrections */
-      details.corr { font-size: 11px; margin: 4px 0 10px; border-top: 1px solid #444; padding-top: 6px; }
-      details.corr summary { cursor: pointer; color: #cdd; user-select: none; }
-      details.corr .item { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
-      .corr .orig { color: #c88; text-decoration: line-through; }
-      .corr .arrow { color: #777; }
-      .corr .new { color: #8c8; }
-      .corr .src { color: #777; font-size: 10px; }
-      .corr .loc { color: #7ab; cursor: pointer; text-decoration: underline; margin-left: auto; white-space: nowrap; }
-      .corr .loc:hover { color: #9cf; }
-      .corr .sugg { display: flex; align-items: baseline; gap: 6px; cursor: pointer; }
-      .corr .sugg input { margin: 0 2px 0 0; }
-      .corr .bulk { gap: 6px; }
-      .corr .bulk button { font-size: 10px; padding: 2px 8px; }
-
-      /* Spinner d'attente (transcription). La passe LLM aura plus tard sa propre
-         animation aux codes « IA ». */
-      .spinner { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid #444;
-        border-top-color: #7ab; border-radius: 50%; animation: spin 0.8s linear infinite; }
-      .spinner.hidden { display: none; }
-      @keyframes spin { to { transform: rotate(360deg); } }
-
-      /* Indicateur + réglage de la clé OpenRouter */
-      #llmRow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #bbb;
-        margin: -4px 0 10px; }
-      #llmDot { width: 9px; height: 9px; border-radius: 50%; background: #666; flex: 0 0 auto; }
-      #llmDot.ok { background: #5c5; } #llmDot.warn { background: #db4; }
-      #llmDot.bad { background: #d55; } #llmDot.none { background: #777; }
-      #llmText { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      #llmRow button { font-size: 10px; padding: 2px 8px; }
-      #keyBox { font-size: 11px; background: #262626; border: 1px solid #444; border-radius: 3px;
-        padding: 8px; margin-bottom: 10px; }
-      #keyBox.hidden { display: none; }
-      #keyBox p { margin: 0 0 6px; color: #aaa; line-height: 1.35; }
-      #keyBox a { color: #7ab; cursor: pointer; text-decoration: underline; }
-      #keyInput { width: 100%; box-sizing: border-box; font-size: 12px; padding: 5px 6px;
-        background: #1d1d1d; color: #eee; border: 1px solid #555; border-radius: 3px; margin-bottom: 6px; }
-      #keyBox .row { margin-bottom: 4px; flex-wrap: wrap; }
-      #keyBox button { font-size: 11px; padding: 3px 8px; }
-      #keyMsg { min-height: 14px; color: #9aa; white-space: pre-wrap; }
-
-      /* Zone à sous-titrer + barre d'avancement de la transcription */
-      #zone { font-size: 11px; color: #9ab; margin: -4px 0 10px; }
-      #progress { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin: 0 0 8px; }
-      #progress.hidden { display: none; }
-      #progressFill { height: 100%; width: 0; background: #7ab; transition: width 0.4s ease; }
-      #progress.indeterminate #progressFill { width: 30%; animation: slide 1.2s ease-in-out infinite; }
-      @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+      /* Vocabulaire visuel de Premiere : fond des panneaux, sections repliables
+         séparées par des filets, libellés à gauche, bouton d'action bleu arrondi. */
+      :root {
+        --bg: #1d1d1d; --field: #2b2b2b; --field-line: #3a3a3a; --line: #2a2a2a;
+        --text: #d4d4d4; --strong: #f0f0f0; --label: #a0a0a0; --dim: #7d7d7d;
+        --accent: #3b63fb; --accent-hover: #5279ff; --link: #8fb0ff;
+        --ok: #2fb35f; --warn: #d9a63a; --bad: #e05555; --none: #6f6f6f;
+        --orig: #d98c8c; --new: #8fd18f;
+      }
+      * { box-sizing: border-box; }
+      html, body { background: var(--bg); }
+      body { margin: 0; padding: 0; color: var(--text);
+        font: 12px/1.4 "Adobe Clean", "Segoe UI", -apple-system, system-ui, sans-serif;
+        display: flex; flex-direction: column; min-height: 100vh; }
+      button, input, select, textarea { font: inherit; color: inherit; }
+      .hidden { display: none !important; }
+      .tc { font-variant-numeric: tabular-nums; }
 
       /* Barres de défilement façon Premiere : pas de flèches, piste invisible,
          curseur gris arrondi qui s'éclaircit au survol. */
@@ -75,75 +31,205 @@
       ::-webkit-scrollbar-thumb:active { background-color: #707070; }
       ::-webkit-scrollbar-button { display: none; }
 
-      /* Pied : version + mises à jour */
-      #footer { display: flex; justify-content: space-between; align-items: center;
-        margin-top: 12px; font-size: 10px; color: #6f6f6f; }
-      #updateBtn { font-size: 10px; padding: 2px 8px; background: transparent; color: #8a8a8a; border-color: #444; }
-      #updateBtn.available { color: #8fd18f; border-color: #3f6a48; }
+      /* --- En-tête -------------------------------------------------------- */
+      .head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+      .head .name { font-size: 13px; font-weight: 600; color: var(--strong); }
+      .head .ver { font-size: 10px; color: var(--dim); }
+      .icbtn { margin-left: auto; width: 26px; height: 26px; border-radius: 4px; border: none;
+        background: transparent; color: #a8a8a8; display: flex; align-items: center;
+        justify-content: center; cursor: pointer; padding: 0; }
+      .icbtn:hover { background: #2c2c2c; color: #fff; }
+      .icbtn svg { display: block; }
+
+      /* --- Clé OpenRouter ------------------------------------------------- */
+      #llmRow { display: flex; align-items: center; gap: 7px; margin: 0 12px 8px;
+        font-size: 11px; color: #a8a8a8; }
+      #llmDot { width: 7px; height: 7px; border-radius: 50%; background: var(--none); flex: 0 0 auto; }
+      #llmDot.ok { background: var(--ok); } #llmDot.warn { background: var(--warn); }
+      #llmDot.bad { background: var(--bad); } #llmDot.none { background: var(--none); }
+      #llmText { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .link { background: none; border: none; padding: 0; color: var(--link); cursor: pointer;
+        font-size: 11px; white-space: nowrap; }
+      .link:hover { text-decoration: underline; }
+      .link:disabled { color: #555; cursor: default; text-decoration: none; }
+      #keyBox { margin: 0 12px 10px; padding: 10px; background: #232323;
+        border: 1px solid var(--line); border-radius: 6px; font-size: 11px; }
+      #keyBox p { margin: 0 0 8px; color: #a8a8a8; line-height: 1.4; }
+      #keyBox .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+      #keyMsg { min-height: 14px; margin-top: 6px; color: #a8a8a8; white-space: pre-wrap; }
+
+      /* --- Sections repliables ------------------------------------------- */
+      details.sec { border-top: 1px solid var(--line); }
+      details.sec > summary { display: flex; align-items: center; gap: 6px; padding: 9px 12px;
+        font-size: 11px; font-weight: 600; color: #bdbdbd; cursor: pointer; list-style: none;
+        user-select: none; outline: none; }
+      details.sec > summary::-webkit-details-marker { display: none; }
+      details.sec > summary::before { content: ""; width: 5px; height: 5px; margin: 0 3px 0 2px;
+        border-right: 1.5px solid #8a8a8a; border-bottom: 1.5px solid #8a8a8a;
+        transform: rotate(-45deg); transition: transform 0.12s; flex: 0 0 auto; }
+      details.sec[open] > summary::before { transform: rotate(45deg) translate(-1px, -1px); }
+      details.sec > summary:hover { color: #e0e0e0; }
+      details.sec > summary .cnt { margin-left: auto; font-weight: 400; color: #8a8a8a;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      details.sec[open] > summary #settingsSum { display: none; }
+      .body { padding: 0 12px 12px; }
+
+      /* --- Champs -------------------------------------------------------- */
+      .f { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+      .f label { width: 92px; flex: 0 0 auto; color: var(--label); }
+      select, input[type="number"], input[type="password"] { height: 26px; background: var(--field);
+        border: 1px solid var(--field-line); border-radius: 4px; color: #e2e2e2; padding: 0 8px;
+        font-size: 12px; outline: none; min-width: 0; }
+      select { flex: 1; -webkit-appearance: none; appearance: none; padding-right: 24px; cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%23a0a0a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 8px center; }
+      select option { background: var(--field); color: #e2e2e2; }
+      input[type="number"] { width: 64px; }
+      input[type="password"] { width: 100%; }
+      select:hover, input:hover { border-color: #4a4a4a; }
+      select:focus, input:focus { border-color: var(--accent); }
+
+      /* Interrupteur (case à cocher habillée) */
+      .tog { display: flex; align-items: center; gap: 8px; color: var(--label); cursor: pointer;
+        margin: 2px 0 0; user-select: none; }
+      .tog input { position: absolute; opacity: 0; pointer-events: none; }
+      .tog .sw { width: 26px; height: 14px; border-radius: 7px; background: #4a4a4a;
+        position: relative; flex: 0 0 auto; transition: background 0.12s; }
+      .tog .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px;
+        height: 10px; border-radius: 50%; background: #d8d8d8; transition: left 0.12s; }
+      .tog input:checked + .sw { background: var(--accent); }
+      .tog input:checked + .sw::after { left: 14px; background: #fff; }
+
+      /* --- Boutons ------------------------------------------------------- */
+      .btn { height: 30px; border-radius: 15px; border: none; font-weight: 600; font-size: 12px;
+        padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;
+        gap: 6px; cursor: pointer; }
+      .btn.cta { background: var(--accent); color: #fff; width: 100%; }
+      .btn.cta:hover { background: var(--accent-hover); }
+      .btn.cta:disabled { background: #333; color: #777; cursor: default; }
+      .btn.small { height: 24px; border-radius: 12px; padding: 0 12px; font-size: 11px; }
+      .btn.second { background: transparent; color: #d8d8d8; box-shadow: inset 0 0 0 1px #5a5a5a; }
+      .btn.second:hover { box-shadow: inset 0 0 0 1px #8a8a8a; color: #fff; }
+      .btn.second:disabled { color: #666; box-shadow: inset 0 0 0 1px #3a3a3a; cursor: default; }
+
+      /* --- Génération ---------------------------------------------------- */
+      #zone { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 11px; color: #8c8c8c; }
+      #zone svg { flex: 0 0 auto; }
+      #statusRow { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; }
+      #status { font-size: 11px; color: #a8a8a8; white-space: pre-wrap; min-height: 15px; }
+      .spinner { width: 13px; height: 13px; margin-top: 1px; flex: 0 0 auto; border: 2px solid #444;
+        border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #progress { height: 4px; background: #333; border-radius: 2px; overflow: hidden; margin: 10px 0 0; }
+      #progressFill { height: 100%; width: 0; background: var(--accent); transition: width 0.4s ease; }
+      #progress.indeterminate #progressFill { width: 30%; animation: slide 1.2s ease-in-out infinite; }
+      @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+
+      /* --- Corrections et suggestions ------------------------------------ */
+      .links { display: flex; gap: 14px; margin: 0 0 4px; }
+      .item { display: flex; align-items: center; gap: 7px; padding: 4px 0; font-size: 12px; }
+      .item label { display: flex; align-items: center; gap: 7px; cursor: pointer; min-width: 0; }
+      .item input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--accent);
+        flex: 0 0 auto; cursor: pointer; }
+      .orig { color: var(--orig); text-decoration: line-through; }
+      .arrow { color: #777; }
+      .new { color: var(--new); }
+      .loc { margin-left: auto; color: var(--dim); font-size: 11px; cursor: pointer; white-space: nowrap;
+        padding-left: 6px; }
+      .loc:hover { color: var(--link); }
+
+      /* --- Sous-titres --------------------------------------------------- */
+      .cue { padding: 6px 0; }
+      .cue + .cue { border-top: 1px solid #262626; }
+      .cue .tc { font-size: 10px; color: var(--dim); margin-bottom: 3px; }
+      .cue textarea { display: block; width: 100%; resize: none; background: #262626;
+        border: 1px solid #333; border-radius: 4px; padding: 4px 7px; color: #e6e6e6;
+        font-size: 12px; line-height: 1.4; outline: none; overflow: hidden; }
+      .cue textarea:focus { border-color: var(--accent); }
+
+      /* --- Pied : insertion (toujours visible) + version ----------------- */
+      .grow { flex: 1 0 auto; }
+      #foot { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line);
+        padding: 10px 12px 8px; }
+      #upd { display: flex; align-items: center; justify-content: space-between; margin-top: 8px;
+        font-size: 10px; color: #6f6f6f; }
+      #updateBtn { font-size: 10px; color: #8a8a8a; }
+      #updateBtn.available { color: var(--new); }
     </style>
   </head>
   <body>
-    <h1>Coquille</h1>
+    <div class="head">
+      <span class="name">Coquille</span><span class="ver" id="headVersion"></span>
+      <button class="icbtn" id="reset" title="Recommencer : efface les sous-titres générés et annule une génération en cours">
+        <svg width="15" height="15" viewBox="0 0 16 16"><path d="M3.5 6.5A5 5 0 1 1 3 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M3 2.8v3.9h3.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
 
     <div id="llmRow" title="Correction IA (OpenRouter)">
       <span id="llmDot"></span>
       <span id="llmText">Clé OpenRouter : …</span>
-      <button id="llmSettings">Clé…</button>
+      <button class="link" id="llmSettings">Clé…</button>
     </div>
     <div id="keyBox" class="hidden">
       <p>Clé OpenRouter pour les suggestions de correction IA. Elle est enregistrée
-        sur la machine du backend (backend/.env) et n'est jamais réaffichée.
-        <a id="keyLink">Créer une clé sur openrouter.ai</a></p>
+        uniquement sur cette machine et n'est jamais réaffichée.
+        <button class="link" id="keyLink">Créer une clé sur openrouter.ai</button></p>
       <input type="password" id="keyInput" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false" />
-      <div class="row">
-        <button id="keySave">Enregistrer</button>
-        <button id="keyTest">Tester</button>
-        <button id="keyDelete">Retirer</button>
-        <button id="keyClose">Fermer</button>
+      <div class="acts">
+        <button class="btn small cta" id="keySave" style="width:auto">Enregistrer</button>
+        <button class="btn small second" id="keyTest">Tester</button>
+        <button class="btn small second" id="keyDelete">Retirer</button>
+        <button class="btn small second" id="keyClose">Fermer</button>
       </div>
       <div id="keyMsg"></div>
     </div>
 
-    <div class="row">
-      <label for="media">Média :</label>
-      <select id="media"></select>
-    </div>
+    <details class="sec" id="settingsSec" open>
+      <summary>Réglages<span class="cnt" id="settingsSum"></span></summary>
+      <div class="body">
+        <div class="f"><label for="media">Média</label><select id="media"></select></div>
+        <div class="f"><label for="engine">Moteur</label><select id="engine"></select></div>
+        <div class="f"><label for="maxchars">Car. par ligne</label>
+          <input type="number" id="maxchars" min="10" max="80" step="1" value="24" /></div>
+        <label class="tog" title="Correction par le glossaire seul, sans IA">
+          <input type="checkbox" id="offline" /><span class="sw"></span>Hors-ligne (glossaire seul)
+        </label>
+      </div>
+    </details>
 
-    <div class="row">
-      <label for="engine">Moteur :</label>
-      <select id="engine"></select>
-    </div>
+    <details class="sec" open>
+      <summary>Génération</summary>
+      <div class="body">
+        <div id="zone" title="Points d'entrée/sortie de la séquence, sinon clips sélectionnés, sinon toute la séquence">
+          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M3 3v10M13 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span id="zoneText">Zone : …</span>
+        </div>
+        <button class="btn cta" id="generate">Générer les sous-titres</button>
+        <div id="progress" class="hidden"><div id="progressFill"></div></div>
+        <div id="statusRow">
+          <div id="spinner" class="spinner hidden"></div>
+          <div id="status"></div>
+        </div>
+      </div>
+    </details>
 
-    <div class="row">
-      <label for="maxchars">Max car./ligne :</label>
-      <input type="number" id="maxchars" min="10" max="80" step="1" value="24"
-             style="width: 56px;" />
-    </div>
-
-    <div class="row">
-      <button id="generate">1. Générer les sous-titres</button>
-    </div>
-    <div id="zone" title="Points d'entrée/sortie de la séquence, sinon clips sélectionnés, sinon toute la séquence">Zone : …</div>
-    <div class="row">
-      <label><input type="checkbox" id="offline" /> Mode hors-ligne (glossaire seul, sans LLM)</label>
-    </div>
-
-    <div id="statusRow">
-      <div id="spinner" class="spinner hidden"></div>
-      <div id="status"></div>
-    </div>
-    <div id="progress" class="hidden"><div id="progressFill"></div></div>
     <div id="corrections"></div>
-    <div id="cues"></div>
 
-    <div class="row">
-      <button id="insert" disabled>2. Insérer dans la séquence</button>
-      <button id="reset" title="Efface les sous-titres générés et annule une génération en cours">Recommencer</button>
-    </div>
+    <details class="sec hidden" id="cuesSec" open>
+      <summary>Sous-titres<span class="cnt" id="cuesCount"></span></summary>
+      <div class="body" id="cues"></div>
+    </details>
 
-    <div id="footer">
-      <span id="version"></span>
-      <button id="updateBtn">Vérifier les mises à jour</button>
+    <div class="grow"></div>
+    <div id="foot">
+      <button class="btn cta" id="insert" disabled>
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Insérer dans la séquence
+      </button>
+      <div id="upd">
+        <span id="version"></span>
+        <button class="link" id="updateBtn">Vérifier les mises à jour</button>
+      </div>
     </div>
 
     <!-- Config machine, non versionnée (cf. js/config.local.example.js) -->

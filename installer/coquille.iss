@@ -44,7 +44,7 @@ CloseApplications=no
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
 [Messages]
-FinishedLabel=Coquille est installé.%n%nRedémarrez Premiere Pro puis ouvrez Fenêtre > Extensions > Coquille — Sous-titres. Le moteur de transcription démarre tout seul à l'ouverture du panneau.
+FinishedLabel=Coquille est installé.%n%nRedémarrez Premiere Pro puis ouvrez Fenêtre > Extensions > Coquille. Le moteur de transcription démarre tout seul à l'ouverture du panneau.
 
 [InstallDelete]
 ; Code du backend et panneau : repartent propres à chaque mise à jour. Le Python

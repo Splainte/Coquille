@@ -31,7 +31,7 @@ touchera que ce dossier.
    - macOS : `~/Library/Application Support/Adobe/CEP/extensions/com.coquille.subtitles`
    - Windows : `%APPDATA%\Adobe\CEP\extensions\com.coquille.subtitles`
 3. Lancer le backend : `cd backend && uvicorn coquille.app:app --port 8765`
-4. Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille — Sous-titres*.
+4. Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille*.
 5. Débogage : ouvrir <http://localhost:8088> dans Chrome.
 
 ## Rendu audio

@@ -90,7 +90,7 @@ Pour lancer le backend (à garder ouvert dans un terminal) :
 Puis dans Premiere Pro :
 
   1. Ouvre un projet avec une séquence active.
-  2. Menu  Fenêtre ▸ Extensions ▸ « Coquille — Sous-titres ».
+  2. Menu  Fenêtre ▸ Extensions ▸ « Coquille ».
   3. Choisis le média, clique « 1. Générer les sous-titres ».
 
 Correction IA : mets ta clé OpenRouter dans backend/.env (modèle : backend/.env.example).

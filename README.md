@@ -21,7 +21,7 @@ Téléchargez l'installeur dans la [dernière release](https://github.com/Splain
   ▸ Ouvrir). Transcription sur le processeur. Les Mac Intel ne sont pas pris en charge (PyTorch
   n'y existe plus).
 
-Puis redémarrez Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille — Sous-titres*. Le moteur de
+Puis redémarrez Premiere ▸ *Fenêtre ▸ Extensions ▸ Coquille*. Le moteur de
 transcription démarre tout seul à l'ouverture du panneau.
 
 ## Utilisation
@@ -34,6 +34,13 @@ transcription démarre tout seul à l'ouverture du panneau.
    appliqué sans votre accord. Les corrections du glossaire, elles, sont appliquées d'office.
 4. **Insérer** : la piste de sous-titres est créée dans la séquence. Appliquez ensuite le Track
    Style de la marque en un clic.
+
+Le bouton **Recommencer** (flèche circulaire en haut à droite) efface tout ce qui a été généré et
+annule une génération en cours ; les réglages sont conservés.
+
+**Mises à jour** : le panneau vérifie au démarrage s'il existe une nouvelle version. Si c'est le
+cas, le lien en bas du panneau devient « Installer la mise à jour » : un clic la télécharge,
+l'installe (clé et modèles conservés) puis recharge le panneau.
 
 **Clé OpenRouter** (facultative) : bouton *Ajouter la clé* en haut du panneau. Elle est vérifiée
 auprès d'OpenRouter puis enregistrée uniquement sur la machine. Sans clé, seul le glossaire

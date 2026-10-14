@@ -162,5 +162,5 @@ else
 fi
 
 cp "$LOG" "$APP/install.log" 2>/dev/null && chown "$USER_NAME":staff "$APP/install.log"
-echo "Coquille installé. Redémarrez Premiere Pro puis ouvrez Fenêtre > Extensions > Coquille — Sous-titres."
+echo "Coquille installé. Redémarrez Premiere Pro puis ouvrez Fenêtre > Extensions > Coquille."
 exit 0

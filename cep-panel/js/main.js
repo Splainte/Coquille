@@ -204,7 +204,9 @@ function init() {
     } catch (e) {}
     sel.addEventListener("change", function () {
       try { window.localStorage.setItem("coquille.media", sel.value); } catch (e) {}
+      settingsSummary();
     });
+    settingsSummary();
     setStatus("Prêt." + (REMOTE ? " (backend distant)" : ""));
     refreshLlm(true);
     return backend.getEngines();
@@ -214,7 +216,7 @@ function init() {
       var opt = document.createElement("option");
       opt.value = e.id;
       opt.textContent = e.id === "auto"
-        ? e.label + " → " + info.auto_resolves_to + " [" + info.device + "]"
+        ? "Auto · " + info.auto_resolves_to + (info.device === "cuda" ? " (GPU)" : " (processeur)")
         : e.label;
       sel.appendChild(opt);
     });
@@ -230,7 +232,9 @@ function init() {
   if (saved) { $("maxchars").value = saved; }
   $("maxchars").addEventListener("change", function () {
     try { window.localStorage.setItem("coquille.maxchars", $("maxchars").value); } catch (e) {}
+    settingsSummary();
   });
+  $("offline").addEventListener("change", settingsSummary);
 
   $("generate").addEventListener("click", onGenerate);
   $("insert").addEventListener("click", onInsert);
@@ -242,6 +246,13 @@ function init() {
   refreshZone();
   document.body.addEventListener("mouseenter", refreshZone);
   window.addEventListener("focus", refreshZone);
+}
+
+// Résumé des réglages affiché quand la section est repliée.
+function settingsSummary() {
+  var sel = $("media"), opt = sel.options[sel.selectedIndex];
+  $("settingsSum").textContent = (opt ? opt.textContent + " · " : "") + $("maxchars").value +
+    " car." + ($("offline").checked ? " · hors-ligne" : "");
 }
 
 // --- Clé OpenRouter : indicateur + menu de saisie ----------------------------
@@ -373,9 +384,9 @@ function zoneLabel(z) {
 }
 
 function refreshZone() {
-  if (!window.__adobe_cep__) { $("zone").textContent = "Zone : toute la séquence"; return; }
-  getZone().then(function (z) { $("zone").textContent = zoneLabel(z); })
-    .catch(function (e) { $("zone").textContent = "Zone : " + e.message; });
+  if (!window.__adobe_cep__) { $("zoneText").textContent = "Zone : toute la séquence"; return; }
+  getZone().then(function (z) { $("zoneText").textContent = zoneLabel(z); })
+    .catch(function (e) { $("zoneText").textContent = "Zone : " + e.message; });
 }
 
 // --- Barre d'avancement de la transcription ---------------------------------
@@ -431,7 +442,7 @@ function onGenerate() {
   $("insert").disabled = true;
   lastResult = null;
   $("corrections").innerHTML = "";
-  $("cues").innerHTML = "";
+  renderCues([]);
   var media = $("media").value;
   var engine = $("engine").value || "auto";
   var offline = $("offline").checked;
@@ -458,7 +469,7 @@ function onGenerate() {
     .then(function (z) {
       alive();
       zone = z;
-      $("zone").textContent = zoneLabel(z);
+      $("zoneText").textContent = zoneLabel(z);
       setStatus("Rendu audio " + (z.mode === "inout" ? "de la zone" : "de la séquence") + "…");
       return evalScript("coquilleExportAudio(" + jsStr(tmpWav) + "," + jsStr(AUDIO_PRESET_PATH) +
         "," + (z.mode === "inout" ? 1 : 0) + ")");
@@ -514,6 +525,8 @@ function onGenerate() {
       };
       renderCorrections(result.correction);
       renderCues(result.cues);
+      $("settingsSec").open = false;
+      $("generate").textContent = "Générer à nouveau";
       if (result.correction && result.correction.error) { refreshLlm(true); }
       setStatus(
         result.cues.length + " sous-titres générés. " +
@@ -551,7 +564,9 @@ function onReset() {
   lastResult = null;
   review = { media: null, maxChars: null, words: [], accepted: {} };
   $("corrections").innerHTML = "";
-  $("cues").innerHTML = "";
+  renderCues([]);
+  $("settingsSec").open = true;
+  $("generate").textContent = "Générer les sous-titres";
   $("insert").disabled = true;
   setStatus(wasBusy ? "Génération annulée." : "Prêt.");
   refreshZone();
@@ -587,10 +602,10 @@ function correctionSummary(c) {
   var sugg = (c.suggestions && c.suggestions.length) || 0;
   var warn = (c.warnings && c.warnings.length) ? "⚠ " + c.warnings.join(" ") + " " : "";
   if (c.error) {
-    return "⚠ LLM indisponible (glossaire seul, " + gloss + " corr.) — " + c.error + ". ";
+    return "⚠ IA indisponible (glossaire seul, " + gloss + " corr.) — " + c.error + ". ";
   }
   if (c.used_llm) {
-    return gloss + " corr. glossaire, " + sugg + " suggestion(s) LLM à valider (" +
+    return gloss + " corr. glossaire, " + sugg + " suggestion(s) de l'IA à valider (" +
       (c.model || "?") + "). " + warn;
   }
   return gloss + " correction(s) glossaire (hors-ligne). ";
@@ -611,56 +626,72 @@ function seekTo(seconds) {
 
 // Un lien « localiser m:ss.s » qui déplace la tête de lecture.
 function locLink(start) {
-  var loc = document.createElement("span"); loc.className = "loc";
-  loc.textContent = "localiser " + fmtTc(start);
+  var loc = document.createElement("span"); loc.className = "loc tc";
+  loc.textContent = fmtTc(start);
+  loc.title = "Placer la tête de lecture sur ce mot";
   loc.addEventListener("click", function () { seekTo(start); });
   return loc;
 }
 
-// Deux sections : corrections glossaire (appliquées, lecture seule) et
-// suggestions LLM (à valider via cases à cocher). DOM en textContent.
+// Deux sections : suggestions de l'IA (à valider via cases à cocher) et
+// corrections du glossaire (appliquées, lecture seule). DOM en textContent.
 function renderCorrections(corr) {
   var box = $("corrections");
   box.innerHTML = "";
   if (!corr) return;
-  renderGlossarySection(box, corr.items || []);
   renderSuggestionSection(box, corr.suggestions || []);
+  renderGlossarySection(box, corr.items || []);
+}
+
+// Section repliable au style du panneau : titre + compteur à droite.
+function section(title, count, open) {
+  var det = document.createElement("details");
+  det.className = "sec"; det.open = !!open;
+  var sum = document.createElement("summary");
+  sum.appendChild(document.createTextNode(title));
+  var cnt = document.createElement("span"); cnt.className = "cnt"; cnt.textContent = count;
+  sum.appendChild(cnt);
+  var body = document.createElement("div"); body.className = "body";
+  det.appendChild(sum); det.appendChild(body);
+  return { det: det, body: body, cnt: cnt };
+}
+
+// « original → corrigé » (textContent : jamais de HTML venu du moteur).
+function changeSpans(parent, original, replacement, emptyLabel) {
+  var o = document.createElement("span"); o.className = "orig"; o.textContent = original;
+  var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
+  var n = document.createElement("span"); n.className = "new";
+  n.textContent = replacement === "" ? emptyLabel : replacement;
+  parent.appendChild(o); parent.appendChild(a); parent.appendChild(n);
 }
 
 function renderGlossarySection(box, items) {
   if (!items.length) return;
-  var det = document.createElement("details");
-  det.className = "corr";
-  var sum = document.createElement("summary");
-  sum.textContent = "Corrections glossaire (" + items.length + ") — appliquées";
-  det.appendChild(sum);
+  var sec = section("Glossaire", items.length + " appliquée" + (items.length > 1 ? "s" : ""), false);
   items.forEach(function (it) {
     var row = document.createElement("div"); row.className = "item";
-    var o = document.createElement("span"); o.className = "orig"; o.textContent = it.original;
-    var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
-    var n = document.createElement("span"); n.className = "new";
-    n.textContent = it.corrected === "" ? "(supprimé)" : it.corrected;
-    row.appendChild(o); row.appendChild(a); row.appendChild(n);
+    changeSpans(row, it.original, it.corrected, "(supprimé)");
     row.appendChild(locLink(it.start));
-    det.appendChild(row);
+    sec.body.appendChild(row);
   });
-  box.appendChild(det);
+  box.appendChild(sec.det);
 }
 
 function renderSuggestionSection(box, suggestions) {
   if (!suggestions.length) return;
-  var det = document.createElement("details");
-  det.className = "corr"; det.open = true;
-  var sum = document.createElement("summary");
-  sum.textContent = "Suggestions LLM (" + suggestions.length + ") — à valider";
-  det.appendChild(sum);
+  var sec = section("Suggestions de l'IA", "", true);
+  var count = function () {
+    sec.cnt.textContent = Object.keys(review.accepted).length + " / " + suggestions.length +
+      " appliquée" + (Object.keys(review.accepted).length > 1 ? "s" : "");
+  };
+  count();
 
-  // Barre d'actions groupées.
-  var bar = document.createElement("div"); bar.className = "item bulk";
-  var allBtn = document.createElement("button"); allBtn.textContent = "Tout appliquer";
-  var noneBtn = document.createElement("button"); noneBtn.textContent = "Tout ignorer";
+  // Actions groupées.
+  var bar = document.createElement("div"); bar.className = "links";
+  var allBtn = document.createElement("button"); allBtn.className = "link"; allBtn.textContent = "Tout appliquer";
+  var noneBtn = document.createElement("button"); noneBtn.className = "link"; noneBtn.textContent = "Tout ignorer";
   bar.appendChild(allBtn); bar.appendChild(noneBtn);
-  det.appendChild(bar);
+  sec.body.appendChild(bar);
 
   var boxes = [];
   suggestions.forEach(function (sg) {
@@ -669,42 +700,49 @@ function renderSuggestionSection(box, suggestions) {
     cb.addEventListener("change", function () {
       if (cb.checked) { review.accepted[sg.index] = sg; }
       else { delete review.accepted[sg.index]; }
+      count();
       applyReview();
     });
     boxes.push(cb);
-    var o = document.createElement("span"); o.className = "orig"; o.textContent = sg.original;
-    var a = document.createElement("span"); a.className = "arrow"; a.textContent = "→";
-    var n = document.createElement("span"); n.className = "new";
-    n.textContent = sg.suggested === "" ? "(supprimer)" : sg.suggested;
-    var lab = document.createElement("label"); lab.className = "sugg";
-    lab.appendChild(cb); lab.appendChild(o); lab.appendChild(a); lab.appendChild(n);
+    var lab = document.createElement("label");
+    lab.appendChild(cb);
+    changeSpans(lab, sg.original, sg.suggested, "(supprimer)");
     row.appendChild(lab);
     row.appendChild(locLink(sg.start));
-    det.appendChild(row);
+    sec.body.appendChild(row);
   });
 
-  // Actions groupées : on coche/décoche tout, met à jour `accepted`, re-segmente once.
+  // On coche/décoche tout, met à jour `accepted`, puis une seule re-segmentation.
   allBtn.addEventListener("click", function () {
     suggestions.forEach(function (sg) { review.accepted[sg.index] = sg; });
     boxes.forEach(function (cb) { cb.checked = true; });
+    count();
     applyReview();
   });
   noneBtn.addEventListener("click", function () {
     review.accepted = {};
     boxes.forEach(function (cb) { cb.checked = false; });
+    count();
     applyReview();
   });
 
-  box.appendChild(det);
+  box.appendChild(sec.det);
+}
+
+function fmtTc2(s) {
+  var m = Math.floor(s / 60), sec = s - m * 60;
+  return m + ":" + (sec < 10 ? "0" : "") + sec.toFixed(2);
 }
 
 function renderCues(cues) {
   var c = $("cues"); c.innerHTML = "";
+  $("cuesSec").classList.toggle("hidden", !cues.length);
+  $("cuesCount").textContent = cues.length || "";
   cues.forEach(function (cue) {
     var div = document.createElement("div"); div.className = "cue";
     var tc = document.createElement("div"); tc.className = "tc";
-    tc.textContent = "#" + cue.index + "  " + cue.start.toFixed(2) + " → " +
-      cue.end.toFixed(2) + "  (CPS " + cue.cps + ")";
+    tc.textContent = "#" + cue.index + " · " + fmtTc2(cue.start) + " → " + fmtTc2(cue.end);
+    tc.title = cue.cps + " caractères par seconde";
     var ta = document.createElement("textarea");
     ta.rows = cue.lines.length; ta.value = cue.lines.join("\n");
     div.appendChild(tc); div.appendChild(ta); c.appendChild(div);
@@ -818,6 +856,7 @@ function noteRelease(rel) {
 
 function initUpdates() {
   $("version").textContent = VERSION ? "v" + VERSION : "";
+  $("headVersion").textContent = VERSION;
   $("updateBtn").addEventListener("click", onUpdateClick);
   setTimeout(function () { fetchLatest().then(noteRelease).catch(function () {}); }, 3000);
 }
