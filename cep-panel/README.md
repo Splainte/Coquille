@@ -7,9 +7,9 @@ Panneau de sous-titrage pour Premiere Pro, en **CEP/ExtendScript**.
 Le cœur de Coquille est l'**insertion automatisée** de la piste de sous-titres.
 La référence UXP (2026) ne l'expose pas (`Sequence`/`SequenceEditor`/`CaptionTrack`
 sont en lecture seule). Seul ExtendScript fournit `createCaptionTrack` —
-et `exportAsMediaDirect` pour le rendu audio. CEP est déprécié (~sept. 2026) mais
-acceptable pour un outil interne (version Premiere épinglée). Le backend Python
-étant agnostique du runtime, un re-port UXP futur ne touchera que ce dossier.
+et `exportAsMediaDirect` pour le rendu audio. Adobe n'a pas annoncé de date de fin
+pour CEP. Le backend Python étant agnostique du runtime, un re-port UXP futur ne
+touchera que ce dossier.
 
 ## Structure
 
@@ -41,9 +41,7 @@ Le panneau rend l'audio de la séquence avec le préréglage **livré avec Premi
 trouvé automatiquement par `coquilleDefaultAudioPreset()`. Pour forcer un autre
 `.epr`, renseigner `audioPresetPath` dans `js/config.local.js` (cf. l'exemple).
 
-## Banc de test
+## Validation
 
-Le panneau a été validé de bout en bout sur Premiere 26.5.1 (Windows, PC 4090) :
-rendu audio → transcription → correction → revue des suggestions → insertion de
-la piste de sous-titres. Le banc (scripts hors dépôt, `~/projects/CoquilleLab`)
-pilote le panneau à distance via le port de débogage CEP.
+Validé de bout en bout sur Premiere 26.5 (Windows) : rendu audio → transcription →
+correction → revue des suggestions → insertion de la piste de sous-titres.
