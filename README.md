@@ -5,8 +5,6 @@ Extension Adobe Premiere Pro de **sous-titrage augmenté par IA**, pensée pour 
 jargon (noms de produits, anglicismes, homophones) sans toucher au timing, découpe les
 sous-titres en lignes équilibrées puis les insère en piste de sous-titres dans la séquence.
 
-Le nom « Coquille » = *typo* en français.
-
 ## Installation
 
 Téléchargez l'installeur dans la [dernière release](https://github.com/Splainte/Coquille/releases/latest).
